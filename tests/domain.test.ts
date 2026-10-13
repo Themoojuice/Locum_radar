@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { demoStore, emptyStore } from '@/domain/seed';
 import {
   assessEligibility,
+  assessScheduling,
   evaluate,
   localDate,
   normalisePay,
@@ -255,15 +256,18 @@ describe('eligibility before ranking', () => {
         now,
       ).status,
     ).toBe('Ineligible'));
-  it('requires an entire placement to fit an availability window', () =>
-    expect(
-      assessEligibility(
-        o,
-        { ...s.profile, availability: [{ start: '2027-01-20', end: '2027-02-20' }] },
-        f,
-        now,
-      ).status,
-    ).toBe('Ineligible'));
+  it('treats partial availability as a scheduling condition, not ineligibility', () => {
+    const profile = {
+      ...s.profile,
+      availability: [
+        { start: '2027-01-20', end: '2027-02-20', kind: 'available' as const, note: '' },
+      ],
+    };
+    expect(assessEligibility(o, profile, f, now).status).not.toBe('Ineligible');
+    const scheduling = assessScheduling(o, profile);
+    expect(scheduling.status).toBe('Fits with conditions');
+    expect(scheduling.reasons.join(' ')).toMatch(/outside your declared availability/);
+  });
   it('expires in the facility local timezone', () => {
     expect(
       assessEligibility(
@@ -283,7 +287,7 @@ describe('eligibility before ranking', () => {
       .map((j) => [j.opportunity.id, j.eligibility.status])
       .sort();
     const after = evaluate(
-      { ...s, profile: { ...s.profile, weights: presets['Highest income'] } },
+      { ...s, profile: { ...s.profile, weights: presets['Maximum income'] } },
       now,
     )
       .map((j) => [j.opportunity.id, j.eligibility.status])

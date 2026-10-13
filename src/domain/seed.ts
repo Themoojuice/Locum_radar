@@ -155,6 +155,7 @@ export function emptyStore(): Store {
     observations: [],
     runs: [],
     reviews: [],
+    events: [],
   };
 }
 
@@ -170,7 +171,14 @@ export function demoStore(): Store {
     independentCover: 'no',
     supervisionRequired: 'yes',
     eligibleGrades: ['RMO', 'SRMO', 'PHO', 'Registrar'],
-    availability: [{ start: '2027-01-01', end: '2027-12-31' }],
+    competentSpecialties: ['Psychiatry', 'Emergency medicine', 'General medicine'],
+    employmentApproval: 'approved',
+    fellowshipsConfirmed: true,
+    availability: [
+      { start: '2027-01-01', end: '2027-12-31', kind: 'available', note: '' },
+      { start: '2027-02-01', end: '2027-02-14', kind: 'negotiable', note: 'Example rotation week' },
+      { start: '2027-06-01', end: '2027-06-30', kind: 'provisional-leave', note: 'Leave requested' },
+    ],
   };
   s.sources = [
     source('demo-a', 'Example recruiter A', ''),
@@ -226,6 +234,8 @@ export function demoStore(): Store {
               credentials: i === 7 ? ['FRANZCP'] : [],
               independentCover: false,
               supervisionAvailable: true,
+              fellowship: i === 7 ? true : null,
+              procedures: [],
               complete: i !== 4,
             };
       const o: Opportunity = {
@@ -279,6 +289,8 @@ export function demoStore(): Store {
         status: 'advertised',
         contact: '',
         evidence: { all: 'Synthetic example; no real vacancy or eligibility claim.' },
+        flexibility: i === 2 ? 'flexible' : 'fixed',
+        shifts: [],
       };
       const l = {
         ...input,

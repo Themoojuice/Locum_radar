@@ -286,7 +286,7 @@ export function ProfileForm({
           className="button secondary"
           type="button"
           onClick={() =>
-            change('availability', [...p.availability, { start: '2027-01-01', end: '2027-12-31' }])
+            change('availability', [...p.availability, { start: '2027-01-01', end: '2027-12-31', kind: 'available', note: '' }])
           }
         >
           <Plus size={16} /> Add availability

@@ -8,6 +8,7 @@ import { previewImport } from '@/server/extraction';
 import { collectSource } from '@/server/collectors';
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
+import { clientView } from '@/server/views';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
   try {
     if (!authenticated(request))
       return NextResponse.json({ error: 'Sign in to access your radar' }, { status: 401 });
-    return NextResponse.json(await readStore(), {
+    return NextResponse.json(clientView(await readStore()), {
       headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch (error) {
@@ -141,13 +142,13 @@ export async function POST(request: Request) {
           const ids = new Set(
             s.listings.filter((l) => l.opportunityId === body.opportunityId).map((l) => l.id),
           );
-          s.observations = s.observations.filter((o) => !ids.has(o.listingId));
           s.listings = s.listings.filter((l) => !ids.has(l.id));
           s.offers = s.offers.filter((o) => o.opportunityId !== body.opportunityId);
           s.actions = s.actions.filter((a) => a.opportunityId !== body.opportunityId);
           s.reviews = s.reviews.filter(
             (r) => r.opportunityId !== body.opportunityId && r.candidateId !== body.opportunityId,
           );
+          s.events = s.events.filter((e) => e.opportunityId !== body.opportunityId);
           s.opportunities = s.opportunities.filter((o) => o.id !== body.opportunityId);
           return { ok: true };
         }
