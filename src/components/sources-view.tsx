@@ -63,7 +63,9 @@ export function SourcesView({
                   {source.type} ·{' '}
                   {source.method === 'jsonld'
                     ? 'Structured-page adapter · unverified against live board'
-                    : 'Manual import'}{' '}
+                    : source.method === 'json-api'
+                      ? 'JSON adapter · fixture-tested, unverified against live source'
+                      : 'Manual import'}{' '}
                   · {source.permission === 'approved' ? 'Access recorded' : 'Access not approved'}
                 </p>
                 {source.error && <p className="error small">{source.error}</p>}
@@ -86,7 +88,7 @@ export function SourcesView({
                     <ExternalLink size={17} />
                   </a>
                 )}
-                {!demo && source.method === 'jsonld' && (
+                {!demo && source.method !== 'manual' && (
                   <>
                     <button
                       className="button secondary small"

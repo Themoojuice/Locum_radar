@@ -8,7 +8,7 @@ export function collectionPlan(store: Store, enabled: boolean, now = Date.now())
         ? new Date(Date.parse(source.lastAttempt) + source.intervalHours * 3600000).toISOString()
         : null;
       const reasons: string[] = [];
-      if (source.method !== 'jsonld') reasons.push('Collector not built yet');
+      if (source.method === 'manual') reasons.push('Collector not built yet');
       if (source.permission !== 'approved' || !source.permissionEvidence.trim())
         reasons.push('Access review needed');
       if (!source.enabled) reasons.push('Source collection is off');

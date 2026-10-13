@@ -12,14 +12,14 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await expect(page.getByRole('heading', { name: 'Find your next chapter.' })).toBeVisible();
   await expect(page.getByText('Fictional vacancies and a sample doctor profile.')).toBeVisible();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await expect(coverage.getByText('0 / 12', { exact: true })).toBeVisible();
+  await expect(coverage.getByText('0 / 13', { exact: true })).toBeVisible();
   await expect(
     coverage.getByRole('button', { name: 'Search remaining ready sources' }),
   ).toBeDisabled();
-  await coverage.getByText('View all 12 sources and remaining work', { exact: true }).click();
+  await coverage.getByText('View all 13 sources and remaining work', { exact: true }).click();
   await expect(coverage.getByText('Medrecruit', { exact: true })).toBeVisible();
-  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(12);
-  await coverage.getByText('View all 12 sources and remaining work', { exact: true }).click();
+  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(13);
+  await coverage.getByText('View all 13 sources and remaining work', { exact: true }).click();
   await page.screenshot({ path: 'test-results/radar-desktop.png', fullPage: true });
   await page.getByRole('textbox', { name: 'Search opportunities' }).fill('Cairns');
   await expect(page.locator('.job-card')).toHaveCount(1);

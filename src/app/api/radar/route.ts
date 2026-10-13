@@ -66,7 +66,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Import is too large' }, { status: 413 });
     const body = commandSchema.parse(JSON.parse(text));
     if (body.command === 'preview')
-      return NextResponse.json(await previewImport(body.content, body.sourceId, body.format));
+      return NextResponse.json(
+        await previewImport(
+          body.content,
+          body.sourceId,
+          body.format,
+          (await readStore()).facilities,
+        ),
+      );
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
     const result = await transaction((s) => {
       switch (body.command) {
@@ -100,7 +107,7 @@ export async function POST(request: Request) {
             body.enabled &&
             (body.permission !== 'approved' ||
               !body.permissionEvidence.trim() ||
-              source.method !== 'jsonld')
+              source.method === 'manual')
           )
             throw new Error('Enable only a supported adapter with recorded access permission.');
           Object.assign(source, {

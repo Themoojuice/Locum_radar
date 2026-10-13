@@ -17,15 +17,15 @@ The supplied v0.1 specification covers a multi-phase product. This release deliv
 | Timeline                                      | 2027 month navigation, availability strips, placement overlap warnings                     |
 | Tracker and notes                             | Implemented; manual actions only                                                           |
 | Text/HTML/JSON imports                        | Implemented with review, validation and provenance                                         |
-| Recruitment email                             | Uploaded MIME `.eml` message bodies; no OAuth/background inbox or attachment extraction    |
-| Public collectors                             | Disabled generic structured-data candidates for two sources; not live qualified            |
+| Recruitment email                             | `.eml` bodies; known recruiter formats split per vacancy; mail-drop importer; no OAuth     |
+| Public collectors                             | Structured-data and JSON adapters (Wavelength, Adzuna); disabled, not live qualified       |
 | Source registry / health                      | Implemented; explicit unmonitored, success, failure and contribution states                |
 | Other state health portals                    | QLD/NSW starter entries only; remaining states need research and adapters                  |
 | Persistence                                   | SQLite validated; PostgreSQL adapter implemented but not live tested                       |
 | Private access                                | Local loopback default; optional password; hosted configuration gates                      |
 | MFA and friend accounts                       | Deferred; requires identity-aware hosting and per-user authorisation                       |
 | Notification scheduling                       | Deferred; no messages are sent                                                             |
-| National facility directory                   | Deferred pending dataset/licence selection and reconciliation                              |
+| National facility directory                   | AIHW MyHospitals import and label resolution; towns derived, coordinates authoritative     |
 | Biodiversity / adventure                      | Demonstration preference values only; live scores unknown until configured                 |
 | Historical market intelligence                | Source revision history implemented; market trends and benchmarking deferred               |
 | Preference learning                           | Deferred; ranking changes remain user-controlled                                           |

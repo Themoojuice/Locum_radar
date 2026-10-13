@@ -2,11 +2,16 @@ import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import { transaction, readStore } from './database';
-import { extractJobPostings } from './extraction';
+import { extractJobPostings, fromLabelledBlock, type Extraction } from './extraction';
+import { jsonAdapters, type JsonAdapter } from './adapters/json-sources';
 import { fingerprint } from '@/domain/ingestion';
-import type { CollectionRun } from '@/domain/model';
+import type { CollectionRun, Store } from '@/domain/model';
 
-const allowed = new Set(['medrecruit.medworld.com', 'ochrerecruitment.com']);
+const allowed = new Set([
+  'medrecruit.medworld.com',
+  'ochrerecruitment.com',
+  ...Object.values(jsonAdapters).flatMap((a) => a.hosts),
+]);
 export function allowedSourceUrl(url: string) {
   const u = new URL(url);
   return (
@@ -32,7 +37,10 @@ export function publicIpv4(address: string) {
     !(p[0] === 203 && p[1] === 0)
   );
 }
-async function fetchPage(url: string): Promise<{ status: number; text: string }> {
+async function fetchPage(
+  url: string,
+  accept = 'text/html,text/plain',
+): Promise<{ status: number; text: string }> {
   if (!allowedSourceUrl(url))
     throw new Error('Collector URL is outside the fixed source allowlist');
   const host = new URL(url).hostname,
@@ -47,7 +55,7 @@ async function fetchPage(url: string): Promise<{ status: number; text: string }>
         family: 4,
         headers: {
           'User-Agent': 'LocumRadar/0.1 (private research; manual review)',
-          Accept: 'text/html,text/plain',
+          Accept: accept,
         },
         lookup: (_host, _options, callback) => callback(null, addresses[0].address, 4),
       },
@@ -110,6 +118,76 @@ export function robotsAllows(text: string) {
   }
   return true;
 }
+/** Adds new extraction candidates to the review queue; returns how many were new. */
+export function queueExtractions(s: Store, sourceId: string, results: Extraction[]) {
+  let added = 0;
+  for (const result of results) {
+    const id = `extract-${fingerprint({ source: sourceId, raw: result.draft.rawText })}`;
+    if (s.reviews.some((r) => r.id === id)) continue;
+    s.reviews.push({
+      id,
+      kind: 'extraction',
+      opportunityId: null,
+      candidateId: null,
+      reason: result.issues.join(' '),
+      resolved: false,
+      draft: result.draft,
+      rawText: result.draft.rawText || '',
+      sourceId,
+    });
+    added++;
+  }
+  return added;
+}
+const knownExternalIds = (s: Store, sourceId: string) =>
+  new Set([
+    ...s.listings.filter((l) => l.sourceId === sourceId).map((l) => l.externalId),
+    ...s.reviews.filter((r) => r.sourceId === sourceId).map((r) => r.draft?.externalId ?? ''),
+  ]);
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Pages through a JSON adapter newest-first and stops once a page contains no
+ * vacancy that has been seen before, so routine runs make a handful of requests.
+ */
+async function collectJson(adapter: JsonAdapter, sourceId: string) {
+  if (adapter.access === 'site-endpoint') {
+    const robots = await fetchPage(adapter.robotsUrl!);
+    if (robots.status !== 200 || !robotsAllows(robots.text))
+      throw new Error('Robots rules need review; collection stopped conservatively.');
+  }
+  const store = await readStore();
+  const seen = knownExternalIds(store, sourceId);
+  const results: Extraction[] = [];
+  for (let page = 1; page <= adapter.maxPages; page++) {
+    const url = adapter.pageUrl(page, process.env);
+    if (!url) throw new Error('This source needs configuration (for example an API key) first.');
+    if (page > 1) await pause(Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 2000));
+    const response = await fetchPage(url, 'application/json');
+    if (response.status !== 200)
+      throw new Error(
+        `Source returned HTTP ${response.status}; historical vacancies were retained.`,
+      );
+    let body: unknown;
+    try {
+      body = JSON.parse(response.text);
+    } catch {
+      throw new Error(
+        'Source did not return JSON. The endpoint may have changed; use manual import.',
+      );
+    }
+    const { blocks, hasMore } = adapter.parse(body);
+    const extracted = blocks.map((b) => {
+      const r = fromLabelledBlock(b, sourceId, `${sourceId}-json`, store.facilities);
+      r.draft.url = b.url;
+      return r;
+    });
+    results.push(...extracted);
+    const unseen = extracted.filter((r) => !seen.has(r.draft.externalId ?? ''));
+    if (!hasMore || (blocks.length > 0 && unseen.length === 0)) break;
+  }
+  return results;
+}
 export async function collectSource(sourceId: string) {
   const state = await readStore(),
     source = state.sources.find((s) => s.id === sourceId);
@@ -129,7 +207,7 @@ export async function collectSource(sourceId: string) {
     !source.enabled ||
     source.permission !== 'approved' ||
     !source.permissionEvidence ||
-    source.method !== 'jsonld'
+    !(source.method === 'jsonld' || (source.method === 'json-api' && jsonAdapters[source.id]))
   ) {
     record.message = 'Collection is disabled or access permission has not been recorded.';
     await transaction((s) => {
@@ -151,6 +229,23 @@ export async function collectSource(sourceId: string) {
   });
   if (!acquired) return { ...record, message: 'Not due yet; the collection interval is enforced.' };
   try {
+    if (source.method === 'json-api') {
+      const results = await collectJson(jsonAdapters[source.id], sourceId);
+      await transaction((s) => {
+        record.count = queueExtractions(s, sourceId, results);
+        const current = s.sources.find((v) => v.id === sourceId)!;
+        current.lastSuccess = startedAt;
+        current.error = null;
+      });
+      record.status = 'success';
+      record.message = `${record.count} new records await extraction review.`;
+      record.completedAt = new Date().toISOString();
+      await transaction((s) => {
+        s.runs.unshift(record);
+        s.runs = s.runs.slice(0, 200);
+      });
+      return record;
+    }
     const robots = await fetchPage(new URL('/robots.txt', source.url).toString());
     if (robots.status !== 200 || !robotsAllows(robots.text))
       throw new Error('Robots rules need review; collection stopped conservatively.');
@@ -163,29 +258,13 @@ export async function collectSource(sourceId: string) {
       throw new Error(
         `Source returned HTTP ${response.status}; historical vacancies were retained.`,
       );
-    const results = extractJobPostings(response.text, source.id, source.url);
+    const results = extractJobPostings(response.text, source.id, source.url, state.facilities);
     if (!results.length)
       throw new Error(
         'No supported JobPosting records found. The source may have changed; use manual import.',
       );
     await transaction((s) => {
-      for (const result of results) {
-        const id = `extract-${fingerprint({ source: sourceId, raw: result.draft.rawText })}`;
-        if (!s.reviews.some((r) => r.id === id)) {
-          s.reviews.push({
-            id,
-            kind: 'extraction',
-            opportunityId: null,
-            candidateId: null,
-            reason: result.issues.join(' '),
-            resolved: false,
-            draft: result.draft,
-            rawText: result.draft.rawText || '',
-            sourceId,
-          });
-          record.count++;
-        }
-      }
+      record.count = queueExtractions(s, sourceId, results);
       const current = s.sources.find((v) => v.id === sourceId)!;
       current.lastSuccess = startedAt;
       current.error = null;

@@ -32,7 +32,7 @@ See [the import guide](docs/importing.md) for supported fields. Free-form extrac
 - Hourly/day/shift/placement terms, paid units, super, on-call treatment, personal expenses and temporary cost scenarios. Unknown numbers stay unknown.
 - Six ranking presets and adjustable weights. Missing criteria are omitted and remaining weights normalised. Scoring evidence is displayed separately. Withdrawn offers remain in history and are excluded from ranking.
 - Search and filters, shortlist, side-by-side comparison, 2027 placement timeline with overlaps, schematic geographic explorer, small starter facility directory, source registry and source health history.
-- Discover shows real source collection progress, last successes/errors and remaining setup. **Search remaining ready sources** checks every supported, approved, enabled source that is due, with per-source results and a stop control. Existing collectors inspect one configured page each; this is not an exhaustive website crawl. Keep Discover open while the queue runs.
+- Discover shows real source collection progress, last successes/errors and remaining setup. **Search remaining ready sources** checks every supported, approved, enabled source that is due, with per-source results and a stop control. Structured-page collectors inspect one configured page each; JSON adapters page newest-first and stop at the first page with nothing new. Neither is an exhaustive website crawl. Keep Discover open while the queue runs.
 - Application stages, notes, deletion of imported opportunity records, CSV export with spreadsheet-formula escaping.
 - SQLite persistence by default; optional PostgreSQL connection using the same repository contract and schema.
 - Password-protected sessions when configured; strict mutation-origin checking and read protection on every data endpoint.
@@ -41,8 +41,9 @@ See [the import guide](docs/importing.md) for supported fields. Free-form extrac
 ## Important boundaries of this draft
 
 - **The Phase 1 live-collection exit criterion is not yet met.** Synthetic examples and tested imports do not prove live multi-source discovery. Source-specific adapters need permitted access, captured real fixtures and validation.
-- `.eml` imports read the message body; attachments, Gmail/Outlook OAuth and background mailbox sync are not implemented. No mailbox was read during this build.
-- No managed scheduling, automatic notifications, calendar sync, national facility dataset, map tiles, biodiversity integration, travel routing, adaptive learning or automatic applications.
+- `.eml` imports read the message body. Known multi-vacancy recruiter formats (Medrecruit digests, 1Medical tables and alerts) are split into one record per vacancy, and `npm run import-mail` queues a folder of exported emails for review; `scripts/gmail-export.gs` produces that folder from Gmail. Attachments and OAuth mailbox sync are not implemented.
+- `npm run import-facilities` adds the AIHW MyHospitals hospital directory and resolves advertised facility names against it; derived towns are approximate.
+- No managed scheduling, automatic notifications, calendar sync, map tiles, biodiversity integration, travel routing, adaptive learning or automatic applications.
 - Calendar entries represent placement dates, not individual rostered shifts. The map is labelled schematic; new facilities without coordinates remain in its list.
 - No tax calculations, credential certification, fellowship equivalence or guarantees of vacancy availability.
 - PostgreSQL support is implemented but has not been exercised against a real PostgreSQL server in this environment. SQLite is the validated local backend.
@@ -74,7 +75,7 @@ Read [deployment and security](docs/deployment.md) before hosting. Runtime datab
 
 ## Verification
 
-Validated locally on 13 October 2026: 73 logic/security/database tests, five production-browser scenarios (desktop and mobile), TypeScript, lint, formatting and a production build. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
+Validated locally on 13 October 2026: 94 logic/security/database/source-adapter tests, TypeScript, lint, formatting and a production build. The five production-browser scenarios (desktop and mobile) were last run before the source-acquisition changes. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
 
 ```sh
 npm run typecheck
@@ -92,6 +93,7 @@ The browser suite tests the production build, so run `npm run build` first. It u
 - [Architecture and key decisions](docs/architecture.md)
 - [Implementation status against the specification](docs/implementation-status.md)
 - [Competitive landscape and features to study](docs/landscape-2026-10-13.md)
+- [Source acquisition: towards national locum coverage](docs/source-acquisition.md)
 - [Original product specification](docs/product-spec.md)
 
 No commercial licensing assumptions or third-party redistribution rights are inferred from this project's personal-use purpose. Source access is recorded individually; manual imports remain available independently of collectors.

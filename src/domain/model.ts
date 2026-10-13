@@ -145,13 +145,15 @@ export interface Facility {
   adventure: number | null;
   adventureNote: string;
   coverage: 'observed' | 'unknown' | 'excluded';
+  /** Present for directory entries; undefined for facilities added by hand or from ads. */
+  sector?: 'public' | 'private';
 }
 export interface Source {
   id: string;
   name: string;
   url: string;
   type: 'agency' | 'government' | 'email' | 'manual';
-  method: 'manual' | 'jsonld';
+  method: 'manual' | 'jsonld' | 'json-api';
   permission: 'unreviewed' | 'approved' | 'denied';
   permissionEvidence: string;
   enabled: boolean;

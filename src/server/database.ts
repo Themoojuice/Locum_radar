@@ -116,6 +116,14 @@ async function load(c: Connection): Promise<Store> {
     (store[key] as unknown[]) = (await c.query(`SELECT payload FROM ${table}`)).map((r) =>
       JSON.parse(r.payload),
     );
+  // Sources added to the registry after a workspace was created appear disabled and unreviewed.
+  // Untouched entries pick up registry changes (for example a new adapter method).
+  for (const seed of emptyStore().sources) {
+    const existing = store.sources.find((s) => s.id === seed.id);
+    if (!existing) store.sources.push(seed);
+    else if (existing.permission === 'unreviewed' && !existing.enabled)
+      Object.assign(existing, { name: seed.name, url: seed.url, method: seed.method });
+  }
   return store;
 }
 async function save(c: Connection, s: Store) {
