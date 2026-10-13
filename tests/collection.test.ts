@@ -17,9 +17,10 @@ function readyStore() {
 describe('source collection planning', () => {
   it('counts registered web sources, excluding manual and email channels', () => {
     const plan = collectionPlan(emptyStore(), false, now);
-    expect(plan.sources).toHaveLength(14);
+    const web = emptyStore().sources.filter((s) => s.type === 'agency' || s.type === 'government');
+    expect(plan.sources).toHaveLength(web.length);
     expect(plan.checked).toBe(0);
-    expect(plan.neverChecked).toBe(14);
+    expect(plan.neverChecked).toBe(plan.sources.length);
     expect(plan.ready).toBe(0);
   });
   it('only queues supported, approved, enabled and due sources', () => {
@@ -48,7 +49,7 @@ describe('source collection planning', () => {
     source.lastAttempt = '2026-10-11T02:00:00Z';
     source.error = 'HTTP 503';
     const plan = collectionPlan(store, true, now);
-    expect(plan.neverChecked).toBe(14);
+    expect(plan.neverChecked).toBe(plan.sources.length);
     expect(plan.ready).toBe(1);
   });
 });

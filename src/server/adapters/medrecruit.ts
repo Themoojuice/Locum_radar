@@ -123,6 +123,14 @@ export function parseMedrecruitPage(html: string): { blocks: JsonBlock[]; hasMor
           ['Rate', amount && unit ? `AUD ${amount}/${unit}` : null],
           ['Super', superStatus],
           ['Accommodation', accommodation],
+          [
+            'Flexibility',
+            /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(
+              description,
+            )
+              ? 'flexible'
+              : null,
+          ],
           ['Listing ID', j.jobNumber ? `medrecruit-${j.jobNumber}` : null],
           ['URL', url],
         ]),

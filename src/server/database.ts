@@ -1,8 +1,9 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Pool, type PoolClient } from 'pg';
-import type { Store } from '@/domain/model';
+import type { Observation, Store } from '@/domain/model';
+import { migrateProfile } from '@/domain/model';
 import { emptyStore } from '@/domain/seed';
 
 type Row = Record<string, string>;
@@ -28,16 +29,24 @@ const tables = [
     'actions',
     ', opportunity_id TEXT NOT NULL UNIQUE REFERENCES opportunities(id)',
   ],
-  [
-    'source_observations',
-    'observations',
-    ', listing_id TEXT NOT NULL REFERENCES source_listings(id)',
-  ],
   ['collection_runs', 'runs', ', source_id TEXT NOT NULL REFERENCES sources(id)'],
   ['review_queue', 'reviews', ''],
+  ['radar_events', 'events', ', opportunity_id TEXT NOT NULL'],
 ] as const;
+type TableKey = (typeof tables)[number][1];
+/**
+ * Row payloads as they were loaded, per transaction store. Saves write only rows
+ * whose serialised payload changed and delete only rows that disappeared, so a
+ * one-field edit costs one statement rather than a rewrite of the workspace.
+ */
+const snapshots = new WeakMap<Store, Record<TableKey, Map<string, string>>>();
+const rowId = (item: unknown) => {
+  const obj = item as Record<string, unknown>;
+  return String(obj.id ?? obj.opportunityId);
+};
 const globals = globalThis as unknown as {
   radarSqlite?: DatabaseSync;
+  radarStatements?: Map<string, StatementSync>;
   radarPool?: Pool;
   radarReady?: Promise<void>;
   radarQueue?: Promise<unknown>;
@@ -50,13 +59,19 @@ function sqliteConnection(): Connection {
     mkdirSync(path.dirname(file), { recursive: true });
     globals.radarSqlite = new DatabaseSync(file);
     globals.radarSqlite.exec(
-      'PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=10000;',
+      'PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=10000; PRAGMA synchronous=NORMAL;',
     );
+    globals.radarStatements = new Map();
   }
   const db = globals.radarSqlite;
+  const cache = (globals.radarStatements ??= new Map());
   return {
     async query(sql, params = []) {
-      const stmt = db.prepare(sql.replace(/\$\d+/g, '?'));
+      let stmt = cache.get(sql);
+      if (!stmt) {
+        stmt = db.prepare(sql.replace(/\$\d+/g, '?'));
+        cache.set(sql, stmt);
+      }
       if (/^\s*(SELECT|PRAGMA)/i.test(sql)) return stmt.all(...params) as Row[];
       stmt.run(...params);
       return [];
@@ -90,6 +105,10 @@ async function schema(c: Connection) {
     await c.query(
       `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, payload TEXT NOT NULL${relationships})`,
     );
+  // Observations are append-only history. They are written by saves but read on demand.
+  await c.query(
+    'CREATE TABLE IF NOT EXISTS source_observations (id TEXT PRIMARY KEY, payload TEXT NOT NULL, listing_id TEXT NOT NULL REFERENCES source_listings(id))',
+  );
   await c.query(
     'CREATE INDEX IF NOT EXISTS listings_opportunity_idx ON source_listings(opportunity_id)',
   );
@@ -137,13 +156,21 @@ async function load(c: Connection): Promise<Store> {
   if (!profile[0]?.payload) {
     const fresh = emptyStore();
     applyEnvironmentApprovals(fresh);
+    snapshots.set(fresh, emptySnapshot());
     return fresh;
   }
-  const store = { version: 1, profile: JSON.parse(profile[0].payload) } as Store;
-  for (const [table, key] of tables)
-    (store[key] as unknown[]) = (await c.query(`SELECT payload FROM ${table}`)).map((r) =>
-      JSON.parse(r.payload),
-    );
+  const store = {
+    version: 1,
+    profile: JSON.parse(profile[0].payload),
+    observations: [],
+  } as unknown as Store;
+  const snapshot = emptySnapshot();
+  for (const [table, key] of tables) {
+    const rows = await c.query(`SELECT id, payload FROM ${table}`);
+    for (const r of rows) snapshot[key].set(r.id, r.payload);
+    (store[key] as unknown[]) = rows.map((r) => JSON.parse(r.payload));
+  }
+  store.profile = migrateProfile(store.profile);
   // Sources added to the registry after a workspace was created appear disabled and unreviewed.
   // Registry-owned fields follow the code; permission and enablement stay the owner's.
   for (const seed of emptyStore().sources) {
@@ -153,48 +180,91 @@ async function load(c: Connection): Promise<Store> {
       Object.assign(existing, {
         name: seed.name,
         url: seed.url,
+        type: seed.type,
         method: seed.method,
+        focus: seed.focus,
         intervalHours: seed.intervalHours,
       });
   }
   applyEnvironmentApprovals(store);
+  snapshots.set(store, snapshot);
   return store;
 }
+const emptySnapshot = () =>
+  Object.fromEntries(tables.map(([, key]) => [key, new Map<string, string>()])) as Record<
+    TableKey,
+    Map<string, string>
+  >;
 async function save(c: Connection, s: Store) {
+  const before = snapshots.get(s) ?? emptySnapshot();
   await c.query("UPDATE user_profiles SET payload = $1 WHERE id = 'owner'", [
     JSON.stringify(s.profile),
   ]);
+  // Alert events are short-lived; keep four months and at most 5,000.
+  const cutoff = new Date(Date.now() - 120 * 86400000).toISOString();
+  s.events = (s.events ?? []).filter((e) => e.at >= cutoff).slice(-5000);
+  const wanted = {} as Record<TableKey, Set<string>>;
   for (const [table, key, relationships] of tables) {
     const columns = [...relationships.matchAll(/, (\w+) TEXT/g)].map((m) => m[1]);
-    for (const item of s[key]) {
-      const obj = item as unknown as Record<string, unknown>;
-      const id = String(obj.id ?? obj.opportunityId);
-      const values = [
+    const names = ['id', 'payload', ...columns];
+    const sql = `INSERT INTO ${table} (${names.join(', ')}) VALUES (${names.map((_, i) => `$${i + 1}`).join(', ')}) ON CONFLICT (id) DO UPDATE SET ${names
+      .slice(1)
+      .map((n) => `${n} = excluded.${n}`)
+      .join(', ')}`;
+    wanted[key] = new Set();
+    for (const item of s[key] as unknown[]) {
+      const id = rowId(item);
+      wanted[key].add(id);
+      const payload = JSON.stringify(item);
+      if (before[key].get(id) === payload) continue;
+      const obj = item as Record<string, unknown>;
+      await c.query(sql, [
         id,
-        JSON.stringify(item),
+        payload,
         ...columns.map((col) =>
           String(obj[col.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())]),
         ),
-      ];
-      const names = ['id', 'payload', ...columns];
-      await c.query(
-        `INSERT INTO ${table} (${names.join(', ')}) VALUES (${values.map((_, i) => `$${i + 1}`).join(', ')}) ON CONFLICT (id) DO UPDATE SET ${names
-          .slice(1)
-          .map((n) => `${n} = excluded.${n}`)
-          .join(', ')}`,
-        values,
-      );
+      ]);
+      before[key].set(id, payload);
     }
   }
-  for (const [table, key] of [...tables].reverse()) {
-    const wanted = new Set(
-      s[key].map((item) => String('id' in item ? item.id : item.opportunityId)),
+  // New observations only: history already in the database is never rewritten.
+  for (const o of s.observations ?? [])
+    await c.query(
+      'INSERT INTO source_observations (id, payload, listing_id) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
+      [o.id, JSON.stringify(o), o.listingId],
     );
-    for (const row of await c.query(`SELECT id FROM ${table}`))
-      if (!wanted.has(row.id)) await c.query(`DELETE FROM ${table} WHERE id = $1`, [row.id]);
+  s.observations = [];
+  for (const [table, key] of [...tables].reverse()) {
+    for (const id of [...before[key].keys()]) {
+      if (wanted[key].has(id)) continue;
+      if (key === 'listings')
+        await c.query('DELETE FROM source_observations WHERE listing_id = $1', [id]);
+      await c.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+      before[key].delete(id);
+    }
   }
 }
-export async function transaction<T>(fn: (s: Store) => T | Promise<T>, write = true): Promise<T> {
+/** Observation history for the given listings, oldest first. */
+export async function readObservations(listingIds: string[]): Promise<Observation[]> {
+  if (!listingIds.length) return [];
+  return run(async (c) => {
+    const out: Observation[] = [];
+    for (const id of listingIds)
+      out.push(
+        ...(
+          await c.query('SELECT payload FROM source_observations WHERE listing_id = $1', [id])
+        ).map((r) => JSON.parse(r.payload) as Observation),
+      );
+    return out.sort((a, b) => a.observedAt.localeCompare(b.observedAt));
+  });
+}
+/**
+ * Runs `fn` on a connection inside a transaction. PostgreSQL locks the owner row;
+ * SQLite serialises callbacks on one connection and uses BEGIN IMMEDIATE, which
+ * also guards against a separate collector process writing to the same file.
+ */
+async function run<T>(fn: (c: Connection) => Promise<T>, write = false): Promise<T> {
   if (process.env.DATABASE_URL) {
     globals.radarPool ??= new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
     const client = await globals.radarPool.connect(),
@@ -202,10 +272,8 @@ export async function transaction<T>(fn: (s: Store) => T | Promise<T>, write = t
     try {
       await ready(c);
       await c.query('BEGIN');
-      await c.query("SELECT id FROM user_profiles WHERE id = 'owner' FOR UPDATE");
-      const state = await load(c);
-      const result = await fn(state);
-      if (write) await save(c, state);
+      if (write) await c.query("SELECT id FROM user_profiles WHERE id = 'owner' FOR UPDATE");
+      const result = await fn(c);
       await c.query('COMMIT');
       return result;
     } catch (error) {
@@ -215,19 +283,15 @@ export async function transaction<T>(fn: (s: Store) => T | Promise<T>, write = t
       client.release();
     }
   }
-  // Serialize asynchronous callbacks on one SQLite connection. BEGIN IMMEDIATE also
-  // guards against a separate collector process writing to the same database.
   const previous = globals.radarQueue ?? Promise.resolve();
   const task = previous
     .catch(() => {})
     .then(async () => {
       const c = sqliteConnection();
       await ready(c);
-      await c.query('BEGIN IMMEDIATE');
+      await c.query(write ? 'BEGIN IMMEDIATE' : 'BEGIN');
       try {
-        const state = await load(c);
-        const result = await fn(state);
-        if (write) await save(c, state);
+        const result = await fn(c);
         await c.query('COMMIT');
         return result;
       } catch (error) {
@@ -237,5 +301,13 @@ export async function transaction<T>(fn: (s: Store) => T | Promise<T>, write = t
     });
   globals.radarQueue = task.catch(() => {});
   return task;
+}
+export function transaction<T>(fn: (s: Store) => T | Promise<T>, write = true): Promise<T> {
+  return run(async (c) => {
+    const state = await load(c);
+    const result = await fn(state);
+    if (write) await save(c, state);
+    return result;
+  }, write);
 }
 export const readStore = () => transaction((s) => s, false);

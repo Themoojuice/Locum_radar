@@ -1,4 +1,4 @@
-import { RadarApp } from '@/components/radar-app';
+import { ClientApp } from '@/components/client-app';
 export default function Home() {
-  return <RadarApp />;
+  return <ClientApp />;
 }

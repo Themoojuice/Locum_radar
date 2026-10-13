@@ -86,12 +86,14 @@ const source = (
   url: string,
   type: Source['type'] = 'agency',
   method: Source['method'] = 'manual',
+  focus = '',
 ): Source => ({
   id,
   name,
   url,
   type,
   method,
+  focus,
   permission: 'unreviewed',
   permissionEvidence: '',
   enabled: false,
@@ -115,6 +117,7 @@ export function emptyStore(): Store {
         'https://medrecruit.medworld.com/jobs/listing/locum/australia',
         'agency',
         'json-api',
+        'National agency; largest public locum board',
       ),
       source(
         '1medical',
@@ -122,31 +125,107 @@ export function emptyStore(): Store {
         'https://www.1medical.com.au/doctors/job-board/',
         'agency',
         'json-api',
+        'National agency; strong in regional QLD and NSW',
       ),
       source(
-        'ochre',
-        'Ochre Recruitment',
-        'https://ochrerecruitment.com/medical-jobs',
+        'wavelength',
+        'Wavelength',
+        'https://wave.com.au/jobs/listing',
         'agency',
-        'jsonld',
+        'json-api',
+        'National agency; locum and permanent',
       ),
-      source('skilled', 'Skilled Medical', 'https://skilledmedical.com/'),
-      source('wavelength', 'Wavelength', 'https://wave.com.au/jobs/listing', 'agency', 'json-api'),
+      source(
+        'salt',
+        'Salt Medical Recruitment',
+        'https://saltmedics.com/doctor-jobs/',
+        'agency',
+        'json-api',
+        'Rural and remote locums; also nursing (skipped)',
+      ),
+      source(
+        'global-medics',
+        'Global Medics (APAC)',
+        'https://apac.globalmedics.com/find-a-job/',
+        'agency',
+        'json-api',
+        'Australia and New Zealand (NZ skipped)',
+      ),
+      source(
+        'jps',
+        'JPS Medical',
+        'https://www.jpsmedical.com.au/',
+        'agency',
+        'json-api',
+        'GP and hospital locums',
+      ),
+      source(
+        'dna',
+        'DNA Medical Recruitment',
+        'https://www.dnamedicalrecruitment.com.au/',
+        'agency',
+        'json-api',
+        'Small board; correctional and primary care',
+      ),
       source(
         'adzuna',
         'Adzuna (The Adzuna API)',
         'https://www.adzuna.com.au/',
         'agency',
         'json-api',
+        'Aggregator; discovery leads only',
       ),
-      source('global-medics', 'Global Medics', 'https://www.globalmedics.com/'),
+      source(
+        'ochre',
+        'Ochre Recruitment',
+        'https://ochrerecruitment.com/locum-jobs',
+        'agency',
+        'manual',
+        'Needs an HTML adapter',
+      ),
+      source(
+        'medlo',
+        'Medlo',
+        'https://medlo.com.au/locum-jobs',
+        'agency',
+        'manual',
+        'Direct-booking platform with shift-level rates',
+      ),
+      source(
+        'statdoctor',
+        'StatDoctor',
+        'https://statdoctor.app/',
+        'agency',
+        'manual',
+        'App-only direct booking; use its emails',
+      ),
+      source(
+        'healthcare-australia',
+        'Healthcare Australia / Medic Oncall',
+        'https://www.healthcareaustralia.com.au/',
+        'agency',
+        'manual',
+        'National agency; ask for a feed',
+      ),
+      source('skilled', 'Skilled Medical', 'https://skilledmedical.com/'),
       source('cmr', 'Cornerstone Medical Recruitment', 'https://www.cmr.com.au/'),
-      source('jps', 'JPS Medical', 'https://www.jpsmedical.com.au/'),
       source('charterhouse', 'Charterhouse Medical', 'https://www.charterhousemedical.com/'),
-      source('salt', 'Salt Medical Recruitment', 'https://saltmedics.com/'),
-      source('dna', 'DNA Medical Recruitment', 'https://www.dnamedicalrecruitment.com.au/'),
-      source('qld-health', 'Queensland Health', 'https://smartjobs.qld.gov.au/', 'government'),
-      source('nsw-health', 'NSW Health', 'https://jobs.health.nsw.gov.au/', 'government'),
+      source(
+        'qld-health',
+        'Queensland Health',
+        'https://smartjobs.qld.gov.au/',
+        'government',
+        'manual',
+        'Mostly employed roles',
+      ),
+      source(
+        'nsw-health',
+        'NSW Health',
+        'https://jobs.health.nsw.gov.au/',
+        'government',
+        'manual',
+        'Mostly employed roles',
+      ),
     ],
     opportunities: [],
     offers: [],
@@ -155,6 +234,7 @@ export function emptyStore(): Store {
     observations: [],
     runs: [],
     reviews: [],
+    events: [],
   };
 }
 
@@ -170,7 +250,19 @@ export function demoStore(): Store {
     independentCover: 'no',
     supervisionRequired: 'yes',
     eligibleGrades: ['RMO', 'SRMO', 'PHO', 'Registrar'],
-    availability: [{ start: '2027-01-01', end: '2027-12-31' }],
+    competentSpecialties: ['Psychiatry', 'Emergency medicine', 'General medicine'],
+    employmentApproval: 'approved',
+    fellowshipsConfirmed: true,
+    availability: [
+      { start: '2027-01-01', end: '2027-12-31', kind: 'available', note: '' },
+      { start: '2027-02-01', end: '2027-02-14', kind: 'negotiable', note: 'Example rotation week' },
+      {
+        start: '2027-06-01',
+        end: '2027-06-30',
+        kind: 'provisional-leave',
+        note: 'Leave requested',
+      },
+    ],
   };
   s.sources = [
     source('demo-a', 'Example recruiter A', ''),
@@ -216,7 +308,10 @@ export function demoStore(): Store {
       f.adventure = adventure;
       f.adventureNote = 'Illustrative personal preference, not measured biodiversity data';
       f.coverage = 'observed';
-      const stamp = '2026-10-12T22:00:00.000Z';
+      // Example ages are relative to today so the workspace never looks stale.
+      const stamp = new Date(Date.now() - 86400000).toISOString();
+      // Most examples were first seen weeks ago; two are new, to show the "new" state.
+      const first = i < 2 ? stamp : new Date(Date.now() - 21 * 86400000).toISOString();
       const requirements =
         i === 6
           ? { ...unknownRequirements }
@@ -226,6 +321,8 @@ export function demoStore(): Store {
               credentials: i === 7 ? ['FRANZCP'] : [],
               independentCover: false,
               supervisionAvailable: true,
+              fellowship: i === 7 ? true : null,
+              procedures: [],
               complete: i !== 4,
             };
       const o: Opportunity = {
@@ -240,7 +337,7 @@ export function demoStore(): Store {
         reference: `EXAMPLE-${i}`,
         requirements,
         status: 'advertised',
-        firstSeenAt: stamp,
+        firstSeenAt: first,
         lastSeenAt: stamp,
         verifiedAt: null,
         demo: true,
@@ -279,6 +376,8 @@ export function demoStore(): Store {
         status: 'advertised',
         contact: '',
         evidence: { all: 'Synthetic example; no real vacancy or eligibility claim.' },
+        flexibility: i === 2 ? 'flexible' : 'fixed',
+        shifts: [],
       };
       const l = {
         ...input,
@@ -322,6 +421,45 @@ export function demoStore(): Store {
       }
     },
   );
+  // A few example events so the alerts drawer has something to show.
+  const ago = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
+  s.events = [
+    {
+      id: 'demo-e1',
+      at: ago(30),
+      opportunityId: 'demo-1',
+      kind: 'new',
+      sourceId: 'demo-a',
+      detail: 'Emergency medicine Registrar',
+    },
+    {
+      id: 'demo-e2',
+      at: ago(20),
+      opportunityId: 'demo-1',
+      kind: 'new-offer',
+      sourceId: 'demo-b',
+      detail: 'Another source advertises this vacancy.',
+      after: 175,
+    },
+    {
+      id: 'demo-e3',
+      at: ago(6),
+      opportunityId: 'demo-3',
+      kind: 'rate-change',
+      sourceId: 'demo-a',
+      detail: 'Rate changed from $155 to $170.',
+      before: 155,
+      after: 170,
+    },
+    {
+      id: 'demo-e4',
+      at: ago(3),
+      opportunityId: 'demo-0',
+      kind: 'status',
+      sourceId: 'demo-a',
+      detail: 'Recruiter confirmed the roster is days only.',
+    },
+  ];
   s.actions = [
     {
       opportunityId: 'demo-0',

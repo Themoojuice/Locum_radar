@@ -5,9 +5,11 @@ import { readStore, transaction } from '@/server/database';
 import { listingInputSchema, profileSchema, stages } from '@/domain/model';
 import { ingest, mergeOpportunities, splitListing } from '@/domain/ingestion';
 import { previewImport } from '@/server/extraction';
-import { collectSource } from '@/server/collectors';
+import { collectSource, testSource } from '@/server/collectors';
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
+import { clientView } from '@/server/views';
+import { enrichBiodiversity } from '@/server/biodiversity';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -37,7 +39,10 @@ const commandSchema = z.discriminatedUnion('command', [
     enabled: z.boolean(),
   }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
+  z.object({ command: z.literal('test-source'), sourceId: z.string() }),
   z.object({ command: z.literal('prepare') }),
+  z.object({ command: z.literal('nature') }),
+  z.object({ command: z.literal('alerts-seen'), at: z.string().datetime() }),
   z.object({ command: z.literal('stop') }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
   z.object({ command: z.literal('split'), listingId: z.string() }),
@@ -48,7 +53,7 @@ export async function GET(request: Request) {
   try {
     if (!authenticated(request))
       return NextResponse.json({ error: 'Sign in to access your radar' }, { status: 401 });
-    return NextResponse.json(await readStore(), {
+    return NextResponse.json(clientView(await readStore()), {
       headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch (error) {
@@ -79,7 +84,9 @@ export async function POST(request: Request) {
         ),
       );
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
+    if (body.command === 'test-source') return NextResponse.json(await testSource(body.sourceId));
     if (body.command === 'prepare') return NextResponse.json(await prepareCollection());
+    if (body.command === 'nature') return NextResponse.json(await enrichBiodiversity());
     if (body.command === 'stop') {
       requestStop();
       return NextResponse.json({ ok: true });
@@ -87,7 +94,11 @@ export async function POST(request: Request) {
     const result = await transaction((s) => {
       switch (body.command) {
         case 'profile':
-          s.profile = body.profile;
+          // Alert read state is not part of the profile form; keep the stored value.
+          s.profile = { ...body.profile, alertsSeenAt: s.profile.alertsSeenAt };
+          return { ok: true };
+        case 'alerts-seen':
+          s.profile.alertsSeenAt = body.at;
           return { ok: true };
         case 'action': {
           if (!s.opportunities.some((o) => o.id === body.opportunityId))
@@ -141,13 +152,13 @@ export async function POST(request: Request) {
           const ids = new Set(
             s.listings.filter((l) => l.opportunityId === body.opportunityId).map((l) => l.id),
           );
-          s.observations = s.observations.filter((o) => !ids.has(o.listingId));
           s.listings = s.listings.filter((l) => !ids.has(l.id));
           s.offers = s.offers.filter((o) => o.opportunityId !== body.opportunityId);
           s.actions = s.actions.filter((a) => a.opportunityId !== body.opportunityId);
           s.reviews = s.reviews.filter(
             (r) => r.opportunityId !== body.opportunityId && r.candidateId !== body.opportunityId,
           );
+          s.events = s.events.filter((e) => e.opportunityId !== body.opportunityId);
           s.opportunities = s.opportunities.filter((o) => o.id !== body.opportunityId);
           return { ok: true };
         }

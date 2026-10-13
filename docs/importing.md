@@ -39,7 +39,7 @@ Contact: Example recruiter
 
 Do not mark requirements complete just because the parser found no more fields. Only use that field when the source has actually confirmed the requirement list.
 
-Other labelled fields include `Credentials` (comma-separated), `Paid days`, `Paid shifts`, `Direct expenses`, `Travel hours`, `Additional pay`, and `Arrangement` (`employee` or `contractor`). Include only facts present in the advertisement or subsequently confirmed. Paid hours mean **total paid hours for the placement**, not hours per day.
+Other labelled fields include `Credentials` (comma-separated), `Paid days`, `Paid shifts`, `Direct expenses`, `Travel hours`, `Additional pay`, `Arrangement` (`employee` or `contractor`) and `Flexibility` (`flexible` or `fixed`). Phrases such as "flexible dates" or "dates negotiable" in the text also mark a vacancy flexible. JSON imports may also carry `shifts` (a list of `{ date, start, end, kind }`); listed shifts replace the continuous block when checking your calendar and estimating paid days. Include only facts present in the advertisement or subsequently confirmed. Paid hours mean **total paid hours for the placement**, not hours per day.
 
 Preserve an agency's stable listing ID. The same source and ID update one listing and preserve earlier versions. If no ID exists, the parser uses a content fingerprint; amended text then counts as a new source record until reconciled.
 
@@ -55,6 +55,6 @@ Import a single record or array matching `listingInputSchema` in `src/domain/mod
 
 ## Duplicate resolution
 
-Hospital + overlapping dates alone does not trigger a merge. Automatic linking requires exact facility, specialty, grade, date range, shared hospital reference, roster and compatible requirements. Different recruiter reference numbers are not necessarily shared hospital references. Leave that field blank when uncertain.
+Hospital + overlapping dates alone does not trigger a merge. A different source advertising the same hospital, specialty and grade with start and end dates each within three days is queued as a **likely duplicate** for review; confirming it keeps every offer with its own dates and widens the vacancy to span them. Splitting the listing back out restores its own dates. Automatic linking requires exact facility, specialty, grade, date range, shared hospital reference, roster and compatible requirements. Different recruiter reference numbers are not necessarily shared hospital references. Leave that field blank when uncertain.
 
 Use **Review queue → Inspect opportunity / Inspect possible match**, then confirm a match or keep records separate. On the detail panel, **This is a different vacancy** detaches an offer while retaining its history. Conflicting requirements cannot be merged silently.

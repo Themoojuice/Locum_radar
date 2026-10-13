@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { transaction, readStore } from '@/server/database';
+import { transaction, readStore, readObservations } from '@/server/database';
 import { demoStore } from '@/domain/seed';
 import { ingest } from '@/domain/ingestion';
 import { listingInputSchema } from '@/domain/model';
@@ -29,7 +29,8 @@ describe('transactional persistence and HTTP boundary', () => {
     const s = await readStore();
     expect(s.opportunities).toHaveLength(1);
     expect(s.offers).toHaveLength(1);
-    expect(s.observations).toHaveLength(1);
+    // History is read on demand rather than loaded with every transaction.
+    expect(await readObservations(s.listings.map((l) => l.id))).toHaveLength(1);
   });
   it('rolls back all data when a transaction fails', async () => {
     await expect(
@@ -80,6 +81,7 @@ describe('transactional persistence and HTTP boundary', () => {
   });
   it('deletes related imported content without dangling records', async () => {
     const s = await readStore();
+    const listingIds = s.listings.map((l) => l.id);
     const r = await POST(
       new Request('http://127.0.0.1:3000/api/radar', {
         method: 'POST',
@@ -92,6 +94,6 @@ describe('transactional persistence and HTTP boundary', () => {
     expect(after.opportunities).toHaveLength(0);
     expect(after.listings).toHaveLength(0);
     expect(after.offers).toHaveLength(0);
-    expect(after.observations).toHaveLength(0);
+    expect(await readObservations(listingIds)).toHaveLength(0);
   });
 });

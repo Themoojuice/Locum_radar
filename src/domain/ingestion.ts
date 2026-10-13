@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { listingInputSchema, type Facility, type ListingInput, type Store } from './model';
+import {
+  listingInputSchema,
+  type Facility,
+  type ListingInput,
+  type RadarEvent,
+  type Store,
+} from './model';
+import { normalisePay } from './engine';
 const canonical = (value: unknown): string =>
   value && typeof value === 'object'
     ? Array.isArray(value)
@@ -25,9 +32,105 @@ export const zoneForState: Record<string, string> = {
   TAS: 'Australia/Hobart',
   ACT: 'Australia/Sydney',
 };
-function reconcileStatus(store: Store, id: string) {
-  const related = store.listings.filter((l) => l.opportunityId === id);
-  const target = store.opportunities.find((o) => o.id === id)!;
+/**
+ * Lookup indexes for ingest, cached per store. National collection ingests
+ * thousands of listings per transaction, so linear scans per listing are not
+ * affordable. The cache is rebuilt whenever an array is replaced or resized
+ * outside ingest; in-place relinking (merge, split) calls invalidateIndex.
+ */
+interface Index {
+  listings: unknown;
+  offers: unknown;
+  opportunities: unknown;
+  facilities: unknown;
+  sizes: string;
+  byExternal: Map<string, import('./model').SourceListing>;
+  listingsByOpportunity: Map<string, import('./model').SourceListing[]>;
+  opportunitiesBySlot: Map<string, import('./model').Opportunity[]>;
+  opportunityById: Map<string, import('./model').Opportunity>;
+  opportunitiesByRole: Map<string, import('./model').Opportunity[]>;
+  offerByListing: Map<string, number>;
+  facilitiesByName: Map<string, Facility[]>;
+}
+const indexes = new WeakMap<Store, Index>();
+export const invalidateIndex = (store: Store) => indexes.delete(store);
+/** Dates within this many days at each end may describe the same vacancy. */
+export const DATE_TOLERANCE_DAYS = 3;
+const dayDiff = (a: string, b: string) =>
+  Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000;
+export const nearDates = (
+  a: { startDate: string; endDate: string },
+  b: { startDate: string; endDate: string },
+) =>
+  dayDiff(a.startDate, b.startDate) <= DATE_TOLERANCE_DAYS &&
+  dayDiff(a.endDate, b.endDate) <= DATE_TOLERANCE_DAYS;
+const role = (facilityId: string, specialty: string, grade: string) =>
+  `${facilityId}|${specialty}|${grade}`;
+const slot = (facilityId: string, specialty: string, grade: string, start: string, end: string) =>
+  `${facilityId}|${specialty}|${grade}|${start}|${end}`;
+const sizes = (s: Store) =>
+  `${s.listings.length}|${s.offers.length}|${s.opportunities.length}|${s.facilities.length}`;
+function index(store: Store): Index {
+  const cached = indexes.get(store);
+  if (
+    cached &&
+    cached.listings === store.listings &&
+    cached.offers === store.offers &&
+    cached.opportunities === store.opportunities &&
+    cached.facilities === store.facilities &&
+    cached.sizes === sizes(store)
+  )
+    return cached;
+  const idx: Index = {
+    listings: store.listings,
+    offers: store.offers,
+    opportunities: store.opportunities,
+    facilities: store.facilities,
+    sizes: sizes(store),
+    byExternal: new Map(),
+    listingsByOpportunity: new Map(),
+    opportunitiesBySlot: new Map(),
+    opportunityById: new Map(),
+    opportunitiesByRole: new Map(),
+    offerByListing: new Map(),
+    facilitiesByName: new Map(),
+  };
+  for (const l of store.listings) {
+    idx.byExternal.set(`${l.sourceId}|${l.externalId}`, l);
+    push(idx.listingsByOpportunity, l.opportunityId, l);
+  }
+  for (const o of store.opportunities) {
+    idx.opportunityById.set(o.id, o);
+    push(idx.opportunitiesByRole, role(o.facilityId, o.specialty, o.grade), o);
+  }
+  for (const o of store.opportunities)
+    push(
+      idx.opportunitiesBySlot,
+      slot(o.facilityId, o.specialty, o.grade, o.startDate, o.endDate),
+      o,
+    );
+  store.offers.forEach((o, i) => idx.offerByListing.set(o.listingId, i));
+  for (const f of store.facilities)
+    for (const n of new Set([f.name, ...f.aliases].map(normaliseName)))
+      push(idx.facilitiesByName, `${f.state}|${n}`, f);
+  indexes.set(store, idx);
+  return idx;
+}
+function push<T>(map: Map<string, T[]>, key: string, value: T) {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+}
+const comparableRate = (c: ListingInput['compensation']) =>
+  normalisePay(c).hourly ?? c.amount ?? null;
+function event(store: Store, stamp: string, e: Omit<RadarEvent, 'id' | 'at'>) {
+  (store.events ??= []).push({ id: randomUUID(), at: stamp, ...e });
+}
+function reconcileStatus(store: Store, id: string, target?: import('./model').Opportunity) {
+  const related =
+    indexes.get(store)?.listingsByOpportunity.get(id) ??
+    store.listings.filter((l) => l.opportunityId === id);
+  target ??= store.opportunities.find((o) => o.id === id)!;
   const confirmed = related.filter((l) => l.status === 'confirmed available');
   target.status = confirmed.length
     ? 'confirmed available'
@@ -46,22 +149,19 @@ function reconcileStatus(store: Store, id: string) {
     : null;
 }
 
-export function findFacility(store: Store, input: ListingInput): Facility {
-  const match = store.facilities.find(
-    (f) =>
-      f.state === input.state &&
-      [f.name, ...f.aliases].some((n) => normaliseName(n) === normaliseName(input.facilityName)) &&
-      normaliseName(f.town) === normaliseName(input.town),
+/** True when this opportunity was created beside a possible duplicate awaiting review. */
+const candidateFor = (store: Store, id: string) =>
+  store.reviews.some(
+    (r) => r.kind === 'possible duplicate' && r.opportunityId === id && !r.resolved,
   );
+export function findFacility(store: Store, input: ListingInput): Facility {
+  const named =
+    index(store).facilitiesByName.get(`${input.state}|${normaliseName(input.facilityName)}`) ?? [];
+  const match = named.find((f) => normaliseName(f.town) === normaliseName(input.town));
   if (match) return match;
   // Directory hospitals are unique by name within a state; their derived towns
   // are approximate, so an advertised town fills or overrides nothing else.
-  const directory = store.facilities.find(
-    (f) =>
-      f.id.startsWith('aihw-') &&
-      f.state === input.state &&
-      [f.name, ...f.aliases].some((n) => normaliseName(n) === normaliseName(input.facilityName)),
-  );
+  const directory = named.find((f) => f.id.startsWith('aihw-'));
   if (directory) {
     if (!directory.town) directory.town = input.town;
     if (directory.coverage === 'unknown') directory.coverage = 'observed';
@@ -81,6 +181,11 @@ export function findFacility(store: Store, input: ListingInput): Facility {
     coverage: 'observed',
   };
   store.facilities.push(facility);
+  const idx = indexes.get(store);
+  if (idx) {
+    push(idx.facilitiesByName, `${facility.state}|${normaliseName(facility.name)}`, facility);
+    idx.sizes = sizes(store);
+  }
   return facility;
 }
 
@@ -89,26 +194,24 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
   if (!store.sources.some((s) => s.id === input.sourceId)) throw new Error('Unknown source');
   const stamp = now.toISOString(),
     hash = fingerprint(input);
-  const previous = store.listings.find(
-    (l) => l.sourceId === input.sourceId && l.externalId === input.externalId,
-  );
+  const idx = index(store);
+  const previous = idx.byExternal.get(`${input.sourceId}|${input.externalId}`);
+  const previousOpportunity = previous
+    ? idx.opportunityById.get(previous.opportunityId)
+    : undefined;
   if (previous?.contentHash === hash) {
     previous.observedAt = stamp;
-    store.opportunities.find((o) => o.id === previous.opportunityId)!.lastSeenAt = stamp;
+    if (previousOpportunity) previousOpportunity.lastSeenAt = stamp;
     return { opportunityId: previous.opportunityId, unchanged: true, linked: false };
   }
   const facility = findFacility(store, input);
   // Pay and benefits never identify a vacancy. Require both a stable shared reference
   // and matching non-empty roster, alongside exact facility/role/dates.
-  const similar = store.opportunities.filter(
-    (o) =>
-      !o.demo &&
-      o.facilityId === facility.id &&
-      o.specialty === input.specialty &&
-      o.grade === input.grade &&
-      o.startDate === input.startDate &&
-      o.endDate === input.endDate,
-  );
+  const similar = (
+    idx.opportunitiesBySlot.get(
+      slot(facility.id, input.specialty, input.grade, input.startDate, input.endDate),
+    ) ?? []
+  ).filter((o) => !o.demo);
   const exact = similar.find(
     (o) =>
       input.reference &&
@@ -116,9 +219,7 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
       input.roster &&
       normaliseName(o.roster) === normaliseName(input.roster),
   );
-  const existing = previous
-    ? store.opportunities.find((o) => o.id === previous.opportunityId)
-    : undefined;
+  const existing = previousOpportunity;
   let opportunity = existing ?? exact;
   if (
     existing &&
@@ -150,13 +251,43 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
       reference: input.reference,
       requirements: input.requirements,
       status: input.status,
+      flexibility: input.flexibility,
+      shifts: input.shifts,
       firstSeenAt: stamp,
       lastSeenAt: stamp,
       verifiedAt: input.status === 'confirmed available' ? stamp : null,
       demo: false,
     };
     store.opportunities.push(opportunity);
-    const candidate = existing ?? similar[0];
+    idx.opportunityById.set(opportunity.id, opportunity);
+    // Another agency's advert for nearly the same dates is a likely duplicate:
+    // queue it for review rather than merging on a guess.
+    const near = (
+      idx.opportunitiesByRole.get(role(facility.id, input.specialty, input.grade)) ?? []
+    ).find(
+      (o) =>
+        !o.demo &&
+        o.id !== opportunity!.id &&
+        nearDates(o, input) &&
+        (idx.listingsByOpportunity.get(o.id) ?? []).some((l) => l.sourceId !== input.sourceId),
+    );
+    push(
+      idx.opportunitiesByRole,
+      role(opportunity.facilityId, opportunity.specialty, opportunity.grade),
+      opportunity,
+    );
+    push(
+      idx.opportunitiesBySlot,
+      slot(
+        opportunity.facilityId,
+        opportunity.specialty,
+        opportunity.grade,
+        opportunity.startDate,
+        opportunity.endDate,
+      ),
+      opportunity,
+    );
+    const candidate = existing ?? similar[0] ?? near;
     if (candidate)
       store.reviews.push({
         id: randomUUID(),
@@ -165,7 +296,9 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
         candidateId: candidate.id,
         reason: existing
           ? 'A source changed the placement identity or requirements. Review both versions.'
-          : 'Facility, dates and role match; reference, roster or requirements need reconciliation.',
+          : similar[0]
+            ? 'Facility, dates and role match; reference, roster or requirements need reconciliation.'
+            : 'Same facility and role from another source, with dates within three days. Likely the same vacancy.',
         resolved: false,
         draft: null,
         rawText: null,
@@ -173,6 +306,50 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
       });
   }
   opportunity.lastSeenAt = stamp;
+  if (input.flexibility === 'flexible') opportunity.flexibility = 'flexible';
+  else opportunity.flexibility ??= input.flexibility;
+  if (input.shifts.length && !opportunity.shifts?.length) opportunity.shifts = input.shifts;
+  // Events feed alerts. Linking a second agency's advert is a new offer, not a new job.
+  if (!linked && !previous && !candidateFor(store, opportunity.id))
+    event(store, stamp, {
+      opportunityId: opportunity.id,
+      kind: 'new',
+      sourceId: input.sourceId,
+      detail: input.title,
+    });
+  else if (linked)
+    event(store, stamp, {
+      opportunityId: opportunity.id,
+      kind: 'new-offer',
+      sourceId: input.sourceId,
+      detail: `Another source advertises this vacancy.`,
+      after: comparableRate(input.compensation),
+    });
+  if (previous && previous.opportunityId === opportunity.id) {
+    const was = comparableRate(previous.compensation),
+      now = comparableRate(input.compensation);
+    if (was !== now)
+      event(store, stamp, {
+        opportunityId: opportunity.id,
+        kind: 'rate-change',
+        sourceId: input.sourceId,
+        detail:
+          was === null
+            ? 'A rate was published.'
+            : now === null
+              ? 'The advertised rate was removed.'
+              : `Rate changed from $${was} to $${now}.`,
+        before: was,
+        after: now,
+      });
+    if (previous.status !== input.status)
+      event(store, stamp, {
+        opportunityId: opportunity.id,
+        kind: 'status',
+        sourceId: input.sourceId,
+        detail: `Source status changed from ${previous.status} to ${input.status}.`,
+      });
+  }
   const listingId = previous?.id ?? randomUUID();
   const listing = {
     ...input,
@@ -182,10 +359,7 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     firstSeenAt: previous?.firstSeenAt ?? stamp,
     contentHash: hash,
   };
-  store.listings = store.listings.filter((l) => l.id !== listingId);
-  store.listings.push(listing);
-  store.offers = store.offers.filter((o) => o.listingId !== listingId);
-  store.offers.push({
+  const offer = {
     id: `offer-${listingId}`,
     opportunityId: opportunity.id,
     listingId,
@@ -195,7 +369,23 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     accommodation: input.accommodation,
     contact: input.contact,
     updatedAt: stamp,
-  });
+  };
+  // Replace in place so a re-observed listing keeps its position and the index stays valid.
+  if (previous) {
+    store.listings[store.listings.indexOf(previous)] = listing;
+    const oldList = idx.listingsByOpportunity.get(previous.opportunityId) ?? [];
+    oldList.splice(oldList.indexOf(previous), 1);
+  } else store.listings.push(listing);
+  idx.byExternal.set(`${input.sourceId}|${input.externalId}`, listing);
+  push(idx.listingsByOpportunity, opportunity.id, listing);
+  const offerAt = idx.offerByListing.get(listingId);
+  if (offerAt !== undefined && store.offers[offerAt]?.listingId === listingId)
+    store.offers[offerAt] = offer;
+  else {
+    store.offers.push(offer);
+    idx.offerByListing.set(listingId, store.offers.length - 1);
+  }
+  idx.sizes = sizes(store);
   store.observations.push({
     id: randomUUID(),
     listingId,
@@ -204,15 +394,14 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     snapshot: input,
   });
   // A single withdrawn advert must not withdraw an active competing offer.
-  for (const id of new Set(
-    [opportunity.id, previous?.opportunityId].filter((v): v is string => !!v),
-  )) {
-    reconcileStatus(store, id);
-  }
+  reconcileStatus(store, opportunity.id, opportunity);
+  if (previous && previous.opportunityId !== opportunity.id && previousOpportunity)
+    reconcileStatus(store, previousOpportunity.id, previousOpportunity);
   return { opportunityId: opportunity.id, unchanged: false, linked };
 }
 
 export function mergeOpportunities(store: Store, from: string, to: string) {
+  invalidateIndex(store);
   const a = store.opportunities.find((o) => o.id === from),
     b = store.opportunities.find((o) => o.id === to);
   if (!a || !b || from === to) throw new Error('Select two different opportunities');
@@ -220,8 +409,7 @@ export function mergeOpportunities(store: Store, from: string, to: string) {
     a.facilityId !== b.facilityId ||
     a.specialty !== b.specialty ||
     a.grade !== b.grade ||
-    a.startDate !== b.startDate ||
-    a.endDate !== b.endDate ||
+    !nearDates(a, b) ||
     canonical(a.requirements) !== canonical(b.requirements)
   )
     throw new Error(
@@ -243,6 +431,10 @@ export function mergeOpportunities(store: Store, from: string, to: string) {
   const retainedAction = hasHistory(oldAction) ? oldAction : (targetAction ?? oldAction);
   store.actions = store.actions.filter((x) => x.opportunityId !== from && x.opportunityId !== to);
   if (retainedAction) store.actions.push({ ...retainedAction, opportunityId: to });
+  // Agencies round dates differently. Each listing and offer keeps its own dates;
+  // the vacancy spans them all, and splitting the listing restores its own.
+  b.startDate = [a.startDate, b.startDate].sort()[0];
+  b.endDate = [a.endDate, b.endDate].sort().at(-1)!;
   b.firstSeenAt = [a.firstSeenAt, b.firstSeenAt].sort()[0];
   b.lastSeenAt = [a.lastSeenAt, b.lastSeenAt].sort().at(-1)!;
   reconcileStatus(store, to);
@@ -255,6 +447,7 @@ export function mergeOpportunities(store: Store, from: string, to: string) {
 }
 
 export function splitListing(store: Store, listingId: string) {
+  invalidateIndex(store);
   const listing = store.listings.find((l) => l.id === listingId);
   if (!listing) throw new Error('Listing not found');
   if (store.listings.filter((l) => l.opportunityId === listing.opportunityId).length < 2)
@@ -264,6 +457,8 @@ export function splitListing(store: Store, listingId: string) {
     ...parent,
     id: randomUUID(),
     title: listing.title,
+    startDate: listing.startDate,
+    endDate: listing.endDate,
     roster: listing.roster,
     reference: listing.reference,
     requirements: listing.requirements,

@@ -229,8 +229,21 @@ describe('format helpers', () => {
       specialty: 'General medicine',
       minPgy: 5,
     });
-    expect(classifyRole('Oncology Registrar').specialty).toBe('Other');
+    expect(classifyRole('Oncology Registrar').specialty).toBe('Oncology');
     expect(classifyRole('RMO Nights').specialty).toBeNull();
+    // National vocabulary (LR-001): the most specific discipline wins.
+    const cases: [string, string][] = [
+      ['Paediatric ED Registrar', 'Emergency medicine'],
+      ['Forensic Psychiatry SMO', 'Psychiatry'],
+      ['Anaesthetics Registrar', 'Anaesthetics'],
+      ['O&G SRMO', 'Obstetrics & gynaecology'],
+      ['Orthopaedic Surgery PHO', 'Surgery'],
+      ['Aboriginal Medical Service GP', 'General practice'],
+      ['Cardiology Advanced Trainee', 'Medical subspecialties'],
+      ['Correctional Health MO', 'Other'],
+    ];
+    for (const [role, specialty] of cases) expect(classifyRole(role).specialty).toBe(specialty);
+    expect(classifyRole('Forensic Psychiatry SMO').grade).toBe('SMO');
   });
 });
 

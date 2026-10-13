@@ -132,11 +132,29 @@ The owner reports permission from Medrecruit, 1Medical and Wavelength. The **Fet
 
 None of the live adapters could be exercised from the build environment, which cannot reach these sites; parsers were checked against page data captured from the live sites through a browser.
 
+## v0.2 additions (14 October 2026)
+
+**Discovery is now national and cross-specialty (LR-001).** Collectors no longer skip listings outside the profile's specialties or states. 1Medical's per-run page budget is spent on the most relevant posts first; the rest backfill on later runs.
+
+**Sitemap + JobPosting collector.** One parser for agencies whose job pages carry schema.org `JobPosting` data, configured per agency. Sitemaps inspected on 13 October 2026 (_retrieved_):
+
+| Agency             | Sitemap                                                 | Job pages                                        | Notes                                                              |
+| ------------------ | ------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------ |
+| Salt               | `saltmedics.com/sitemap_index.xml` → `job-sitemap*.xml` | `/job/<slug>/`; 437 URLs in the newest child map | Includes nursing roles and history; filtered by `lastmod` and role |
+| Global Medics APAC | `apac.globalmedics.com/sitemap.xml`                     | `/jobs/<id>-<slug>/`; 281 URLs                   | Includes New Zealand; non-Australian postings are skipped          |
+| JPS Medical, DNA   | `/sitemaps.xml` → ApplyFlow `jobs-sitemap.php`          | `/jobview/<slug>/<id>/` (Allowed by robots)      | DNA listed three jobs; low yield                                   |
+
+Pages are read newest first, at most 120 per run (override with `SALT_DETAIL_LIMIT`, `GLOBAL_MEDICS_DETAIL_LIMIT`, …). Pages skipped as permanent, nursing or overseas are remembered so they are not fetched again. Placement dates are taken only from a single unambiguous range in the description; otherwise the record goes to review. The JobPosting structure of these sites was not inspected directly (the research tools could not read script blocks); run **Test** on each before enabling it.
+
+**Coverage measurement is built.** The Coverage page shows active, unique and shared vacancies per source, parse reliability, run success, state gaps against the national public-hospital directory, and a Chapman estimate of the advertised market from the best-overlapping pair of sources, with an interval. Unresolved likely duplicates count as the same vacancy for the estimate.
+
+**What "50% of the market" can mean.** The denominator that can be estimated is the _advertised_ market. Medrecruit (3,824 Australian locum listings), 1Medical (~4,500 active posts) and Wavelength together are probably most of it, because the remaining agencies are smaller and overlap heavily through the same panel requests (judgement; the Coverage page will replace this with a number after two sources have run). Direct-booking apps, hospital casual pools and unadvertised panel requests are outside every estimate.
+
 ## Open questions and next steps
 
 1. Send permission requests; record replies as permission evidence.
 2. Run the Apps Script for a week and collect a fixture set from every sender that appears, with personal details removed.
-3. Build the sitemap plus `JobPosting` adapter for Salt, Global Medics and DNA, and an HTML adapter for Ochre.
+3. ~~Build the sitemap plus `JobPosting` adapter for Salt, Global Medics and DNA~~ (built in v0.2; needs a live Test run), and an HTML adapter for Ochre.
 4. Confirm the Queensland panel number and whether HealthShare Victoria extended HPVC2022-120; check the NSW in-house agency's status.
 5. Add a manual town field override for the 350 directory hospitals whose town cannot be derived from the name, or use their coordinates.
 6. Verify Adzuna's Australian coverage of doctor locums before relying on it; it could not be reached from the research environment.
