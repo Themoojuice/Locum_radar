@@ -32,6 +32,7 @@ See [the import guide](docs/importing.md) for supported fields. Free-form extrac
 - Hourly/day/shift/placement terms, paid units, super, on-call treatment, personal expenses and temporary cost scenarios. Unknown numbers stay unknown.
 - Six ranking presets and adjustable weights. Missing criteria are omitted and remaining weights normalised. Scoring evidence is displayed separately. Withdrawn offers remain in history and are excluded from ranking.
 - Search and filters, shortlist, side-by-side comparison, 2027 placement timeline with overlaps, schematic geographic explorer, small starter facility directory, source registry and source health history.
+- Discover shows real source collection progress, last successes/errors and remaining setup. **Search remaining ready sources** checks every supported, approved, enabled source that is due, with per-source results and a stop control. Existing collectors inspect one configured page each; this is not an exhaustive website crawl. Keep Discover open while the queue runs.
 - Application stages, notes, deletion of imported opportunity records, CSV export with spreadsheet-formula escaping.
 - SQLite persistence by default; optional PostgreSQL connection using the same repository contract and schema.
 - Password-protected sessions when configured; strict mutation-origin checking and read protection on every data endpoint.
@@ -73,7 +74,7 @@ Read [deployment and security](docs/deployment.md) before hosting. Runtime datab
 
 ## Verification
 
-Validated locally on 13 October 2026: 69 logic/security/database tests, three production-browser scenarios (desktop and mobile), TypeScript, lint, formatting and a production build. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
+Validated locally on 13 October 2026: 73 logic/security/database tests, five production-browser scenarios (desktop and mobile), TypeScript, lint, formatting and a production build. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
 
 ```sh
 npm run typecheck

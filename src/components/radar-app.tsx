@@ -46,6 +46,7 @@ import { ImportDialog } from './import-dialog';
 import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
 import { SourcesView } from './sources-view';
+import { CollectionProgress } from './collection-progress';
 
 type View =
   'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
@@ -678,6 +679,16 @@ export function RadarApp() {
                       </button>
                     </div>
                   </div>
+                  {view === 'Discover' && (
+                    <CollectionProgress
+                      demo={demo}
+                      reload={reload}
+                      onSettings={() => {
+                        setDemo(false);
+                        navigate('Sources');
+                      }}
+                    />
+                  )}
                   {!demo && store.profile.registration === 'unknown' && (
                     <div className="onboarding-note">
                       <ShieldQuestion size={21} />
