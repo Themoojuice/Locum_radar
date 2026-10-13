@@ -168,6 +168,19 @@ export const profileSchema = z.object({
     assumedHoursPerDay: z.number().min(1).max(24).nullable(),
   }),
   weights: weightsSchema,
+  /** Optional natural-history lens for the location score (Atlas of Living Australia). */
+  nature: z.object({
+    enabled: z.boolean(),
+    /** An ALA occurrence query, e.g. "family:Salticidae". */
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[\w:." ()-]+$/, 'Use an ALA query such as family:Salticidae'),
+    label: z.string().trim().min(1).max(40),
+    radiusKm: z.number().int().min(5).max(100),
+  }),
   alertScore: z.number().int().min(0).max(100),
   alertsSeenAt: z.string().max(40).nullable(),
 });
@@ -432,6 +445,7 @@ export const defaultProfile: Profile = {
     assumedHoursPerDay: null,
   },
   weights: { financial: 30, adventure: 25, clinical: 20, logistics: 15, quality: 10 },
+  nature: { enabled: false, query: 'family:Salticidae', label: 'jumping spider', radiusKm: 25 },
   alertScore: 75,
   alertsSeenAt: null,
 };
@@ -448,6 +462,7 @@ export function migrateProfile(stored: unknown): Profile {
     ...p,
     costs: { ...defaultProfile.costs, ...(p.costs ?? {}) },
     urgency: { ...defaultProfile.urgency, ...(p.urgency ?? {}) },
+    nature: { ...defaultProfile.nature, ...(p.nature ?? {}) },
     availability: (p.availability ?? []).map((a) => ({
       ...a,
       kind: a.kind ?? ('available' as const),

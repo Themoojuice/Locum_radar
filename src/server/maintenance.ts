@@ -5,6 +5,7 @@ import { previewImport } from './extraction';
 import { commitExtractions, describeTally } from './collectors';
 import { MYHOSPITALS_URL, mergeFacilities, parseMyHospitals } from './adapters/myhospitals';
 import { log, requestStop } from './progress';
+import { enrichBiodiversity } from './biodiversity';
 
 /** Loads the AIHW hospital directory when the workspace has none yet. */
 export async function ensureFacilityDirectory(force = false) {
@@ -85,6 +86,14 @@ export async function prepareCollection() {
       const message = `Inbox folder could not be read: ${(error as Error).message}`;
       log('email', message, 'error');
       steps.push({ step: 'Inbox', status: 'failed', message });
+    }
+  }
+  if (process.env.COLLECTOR_ENABLED === 'true' && (await readStore()).profile.nature.enabled) {
+    try {
+      const r = await enrichBiodiversity();
+      steps.push({ step: 'Nature lens', status: r.checked ? 'success' : 'skipped', message: r.message });
+    } catch (error) {
+      steps.push({ step: 'Nature lens', status: 'failed', message: (error as Error).message });
     }
   }
   return steps;

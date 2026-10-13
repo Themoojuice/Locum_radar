@@ -9,6 +9,7 @@ import { collectSource, testSource } from '@/server/collectors';
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
 import { clientView } from '@/server/views';
+import { enrichBiodiversity } from '@/server/biodiversity';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -40,6 +41,8 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
   z.object({ command: z.literal('test-source'), sourceId: z.string() }),
   z.object({ command: z.literal('prepare') }),
+  z.object({ command: z.literal('nature') }),
+  z.object({ command: z.literal('alerts-seen'), at: z.string().datetime() }),
   z.object({ command: z.literal('stop') }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
   z.object({ command: z.literal('split'), listingId: z.string() }),
@@ -83,6 +86,7 @@ export async function POST(request: Request) {
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
     if (body.command === 'test-source') return NextResponse.json(await testSource(body.sourceId));
     if (body.command === 'prepare') return NextResponse.json(await prepareCollection());
+    if (body.command === 'nature') return NextResponse.json(await enrichBiodiversity());
     if (body.command === 'stop') {
       requestStop();
       return NextResponse.json({ ok: true });
@@ -90,7 +94,11 @@ export async function POST(request: Request) {
     const result = await transaction((s) => {
       switch (body.command) {
         case 'profile':
-          s.profile = body.profile;
+          // Alert read state is not part of the profile form; keep the stored value.
+          s.profile = { ...body.profile, alertsSeenAt: s.profile.alertsSeenAt };
+          return { ok: true };
+        case 'alerts-seen':
+          s.profile.alertsSeenAt = body.at;
           return { ok: true };
         case 'action': {
           if (!s.opportunities.some((o) => o.id === body.opportunityId))
