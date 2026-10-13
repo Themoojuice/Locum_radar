@@ -23,6 +23,7 @@ export const specialties = [
   'Oncology',
   'Radiology',
   'Addiction medicine',
+  'Medical subspecialties',
   'Other',
 ] as const;
 export const grades = [
@@ -284,6 +285,8 @@ export interface Source {
   regions?: string[];
   /** What kinds of roles it mostly carries, for coverage reporting. */
   focus?: string;
+  /** Pages a sitemap collector has read, so irrelevant pages are not fetched again. */
+  readUrls?: string[];
   permission: 'unreviewed' | 'approved' | 'denied';
   permissionEvidence: string;
   enabled: boolean;

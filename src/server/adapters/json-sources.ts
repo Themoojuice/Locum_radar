@@ -19,6 +19,8 @@ interface AdapterBase {
   /** Documented API (terms govern access) or a site endpoint (robots also applies). */
   access: 'documented-api' | 'site-endpoint';
   robotsUrl: string | null;
+  /** Paths checked against robots before a run starts (every request is also checked). */
+  robotsPaths?: string[];
   /** Names the configuration a run needs, or null when it is ready. */
   missingConfig?(env: Record<string, string | undefined>): string | null;
 }
@@ -35,7 +37,12 @@ export interface CollectContext {
   get(url: string, accept: string): Promise<{ status: number; text: string }>;
   pause(): Promise<void>;
   seen: Set<string>;
-  inScope(specialty: string | null, state: string | null): boolean;
+  /** Pages already read by earlier runs (listing URLs plus pages skipped as irrelevant). */
+  seenUrls?: Set<string>;
+  /** Remembers pages read this run so skipped pages are not fetched again. */
+  markRead?(urls: string[]): void;
+  /** Ordering hint only (0–3); never a reason to skip a listing. */
+  relevance(specialty: string | null, state: string | null): number;
   log(text: string, level?: 'info' | 'warn' | 'error'): void;
   stopped(): boolean;
   env: Record<string, string | undefined>;

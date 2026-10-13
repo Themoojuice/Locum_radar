@@ -5,7 +5,7 @@ import {
   parseOneMedicalDetail,
   parseOneMedicalIndex,
 } from '@/server/adapters/onemedical';
-import { commitExtractions, inProfileScope, robotsDelayFor } from '@/server/collectors';
+import { commitExtractions, profileRelevance, robotsDelayFor } from '@/server/collectors';
 import { applyEnvironmentApprovals } from '@/server/database';
 import { fromLabelledBlock } from '@/server/extraction';
 import { findFacility } from '@/domain/ingestion';
@@ -178,13 +178,13 @@ describe('collection pipeline', () => {
       queued: 1,
     });
   });
-  it('limits collection to the profile scope only when the profile sets one', () => {
-    const profile = emptyStore().profile;
-    expect(inProfileScope(profile, 'Psychiatry', 'QLD')).toBe(true);
-    expect(inProfileScope(profile, 'Other', 'QLD')).toBe(false);
-    expect(inProfileScope(profile, null, 'QLD')).toBe(true);
-    expect(inProfileScope({ ...profile, excludedStates: ['WA'] }, 'Psychiatry', 'WA')).toBe(false);
-    expect(inProfileScope({ ...profile, preferredSpecialties: [] }, 'Other', 'NSW')).toBe(true);
+  it('never skips a listing for being outside the profile; relevance only orders work (LR-001)', () => {
+    const profile = { ...emptyStore().profile, competentSpecialties: ['Intensive care' as const] };
+    expect(profileRelevance(profile, 'Psychiatry', 'QLD')).toBe(3);
+    expect(profileRelevance(profile, 'Intensive care', 'QLD')).toBe(2);
+    expect(profileRelevance(profile, 'Other', 'QLD')).toBe(1);
+    expect(profileRelevance(profile, null, 'QLD')).toBe(1);
+    expect(profileRelevance({ ...profile, excludedStates: ['WA'] }, 'Psychiatry', 'WA')).toBe(0);
   });
   it('records environment approvals only for unreviewed collector sources', () => {
     const store = emptyStore();
@@ -233,5 +233,22 @@ describe('collection pipeline', () => {
     const f = findFacility(store, listingInputSchema.parse(d));
     expect(f.id).toBe('aihw-H1');
     expect(f.town).toBe('Burnie');
+  });
+});
+describe('robots rules (RFC 9309)', () => {
+  it('lets a longer Allow override a shorter Disallow', () => {
+    const robots =
+      'User-agent: *\nDisallow: /jobview\nAllow: /jobview/*/*\n\nUser-agent: *\nDisallow: /wp-admin/';
+    expect(robotsDelayFor(robots, ['/jobview/locum-gp-cairns/4fcd/'])).toBe(0);
+    expect(robotsDelayFor(robots, ['/jobview'])).toBeNull();
+    expect(robotsDelayFor(robots, ['/wp-admin/x'])).toBeNull();
+  });
+  it('prefers a group naming LocumRadar over the wildcard group', () => {
+    const robots = 'User-agent: *\nDisallow: /\n\nUser-agent: LocumRadar\nAllow: /jobs\nDisallow: /';
+    expect(robotsDelayFor(robots, ['/jobs/1'])).toBe(0);
+    expect(robotsDelayFor(robots, ['/about'])).toBeNull();
+  });
+  it('treats an empty Disallow as allowing everything', () => {
+    expect(robotsDelayFor('User-agent: *\nDisallow:', ['/job/x'])).toBe(0);
   });
 });

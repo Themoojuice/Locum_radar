@@ -48,11 +48,24 @@ interface Index {
   listingsByOpportunity: Map<string, import('./model').SourceListing[]>;
   opportunitiesBySlot: Map<string, import('./model').Opportunity[]>;
   opportunityById: Map<string, import('./model').Opportunity>;
+  opportunitiesByRole: Map<string, import('./model').Opportunity[]>;
   offerByListing: Map<string, number>;
   facilitiesByName: Map<string, Facility[]>;
 }
 const indexes = new WeakMap<Store, Index>();
 export const invalidateIndex = (store: Store) => indexes.delete(store);
+/** Dates within this many days at each end may describe the same vacancy. */
+export const DATE_TOLERANCE_DAYS = 3;
+const dayDiff = (a: string, b: string) =>
+  Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000;
+export const nearDates = (
+  a: { startDate: string; endDate: string },
+  b: { startDate: string; endDate: string },
+) =>
+  dayDiff(a.startDate, b.startDate) <= DATE_TOLERANCE_DAYS &&
+  dayDiff(a.endDate, b.endDate) <= DATE_TOLERANCE_DAYS;
+const role = (facilityId: string, specialty: string, grade: string) =>
+  `${facilityId}|${specialty}|${grade}`;
 const slot = (facilityId: string, specialty: string, grade: string, start: string, end: string) =>
   `${facilityId}|${specialty}|${grade}|${start}|${end}`;
 const sizes = (s: Store) =>
@@ -78,6 +91,7 @@ function index(store: Store): Index {
     listingsByOpportunity: new Map(),
     opportunitiesBySlot: new Map(),
     opportunityById: new Map(),
+    opportunitiesByRole: new Map(),
     offerByListing: new Map(),
     facilitiesByName: new Map(),
   };
@@ -85,7 +99,10 @@ function index(store: Store): Index {
     idx.byExternal.set(`${l.sourceId}|${l.externalId}`, l);
     push(idx.listingsByOpportunity, l.opportunityId, l);
   }
-  for (const o of store.opportunities) idx.opportunityById.set(o.id, o);
+  for (const o of store.opportunities) {
+    idx.opportunityById.set(o.id, o);
+    push(idx.opportunitiesByRole, role(o.facilityId, o.specialty, o.grade), o);
+  }
   for (const o of store.opportunities)
     push(idx.opportunitiesBySlot, slot(o.facilityId, o.specialty, o.grade, o.startDate, o.endDate), o);
   store.offers.forEach((o, i) => idx.offerByListing.set(o.listingId, i));
@@ -239,12 +256,22 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     };
     store.opportunities.push(opportunity);
     idx.opportunityById.set(opportunity.id, opportunity);
+    // Another agency's advert for nearly the same dates is a likely duplicate:
+    // queue it for review rather than merging on a guess.
+    const near = (idx.opportunitiesByRole.get(role(facility.id, input.specialty, input.grade)) ?? []).find(
+      (o) =>
+        !o.demo &&
+        o.id !== opportunity!.id &&
+        nearDates(o, input) &&
+        (idx.listingsByOpportunity.get(o.id) ?? []).some((l) => l.sourceId !== input.sourceId),
+    );
+    push(idx.opportunitiesByRole, role(opportunity.facilityId, opportunity.specialty, opportunity.grade), opportunity);
     push(
       idx.opportunitiesBySlot,
       slot(opportunity.facilityId, opportunity.specialty, opportunity.grade, opportunity.startDate, opportunity.endDate),
       opportunity,
     );
-    const candidate = existing ?? similar[0];
+    const candidate = existing ?? similar[0] ?? near;
     if (candidate)
       store.reviews.push({
         id: randomUUID(),
@@ -253,7 +280,9 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
         candidateId: candidate.id,
         reason: existing
           ? 'A source changed the placement identity or requirements. Review both versions.'
-          : 'Facility, dates and role match; reference, roster or requirements need reconciliation.',
+          : similar[0]
+            ? 'Facility, dates and role match; reference, roster or requirements need reconciliation.'
+            : 'Same facility and role from another source, with dates within three days. Likely the same vacancy.',
         resolved: false,
         draft: null,
         rawText: null,
@@ -364,8 +393,7 @@ export function mergeOpportunities(store: Store, from: string, to: string) {
     a.facilityId !== b.facilityId ||
     a.specialty !== b.specialty ||
     a.grade !== b.grade ||
-    a.startDate !== b.startDate ||
-    a.endDate !== b.endDate ||
+    !nearDates(a, b) ||
     canonical(a.requirements) !== canonical(b.requirements)
   )
     throw new Error(
@@ -387,6 +415,10 @@ export function mergeOpportunities(store: Store, from: string, to: string) {
   const retainedAction = hasHistory(oldAction) ? oldAction : (targetAction ?? oldAction);
   store.actions = store.actions.filter((x) => x.opportunityId !== from && x.opportunityId !== to);
   if (retainedAction) store.actions.push({ ...retainedAction, opportunityId: to });
+  // Agencies round dates differently. Each listing and offer keeps its own dates;
+  // the vacancy spans them all, and splitting the listing restores its own.
+  b.startDate = [a.startDate, b.startDate].sort()[0];
+  b.endDate = [a.endDate, b.endDate].sort().at(-1)!;
   b.firstSeenAt = [a.firstSeenAt, b.firstSeenAt].sort()[0];
   b.lastSeenAt = [a.lastSeenAt, b.lastSeenAt].sort().at(-1)!;
   reconcileStatus(store, to);
@@ -409,6 +441,8 @@ export function splitListing(store: Store, listingId: string) {
     ...parent,
     id: randomUUID(),
     title: listing.title,
+    startDate: listing.startDate,
+    endDate: listing.endDate,
     roster: listing.roster,
     reference: listing.reference,
     requirements: listing.requirements,

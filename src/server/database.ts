@@ -178,6 +178,7 @@ async function load(c: Connection): Promise<Store> {
         url: seed.url,
         type: seed.type,
         method: seed.method,
+        focus: seed.focus,
         intervalHours: seed.intervalHours,
       });
   }

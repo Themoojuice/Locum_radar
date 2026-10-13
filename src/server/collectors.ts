@@ -142,44 +142,67 @@ export function queueExtractions(s: Store, sourceId: string, results: Extraction
   return added;
 }
 /**
- * Path-aware robots check for adapters with recorded permission: allowed when
- * no rule for `*` or LocumRadar disallows a path the adapter will request.
- * Returns the crawl delay in milliseconds, or null when a path is disallowed.
+ * Robots rules per RFC 9309: the group naming LocumRadar wins over `*`; groups
+ * for the same agent are merged; the longest matching rule decides, and Allow
+ * wins a tie. Returns null when the text is not a robots file.
  */
-export function robotsDelayFor(text: string, paths: string[]): number | null {
-  if (!/user-agent\s*:/i.test(text)) return null;
-  let relevant = false,
-    sawRule = false,
-    delay = 0;
-  const disallowed: string[] = [];
+export function parseRobots(text: string) {
+  if (!/user-agent\s*:/i.test(text) || /<html/i.test(text)) return null;
+  const groups: { agents: string[]; rules: { allow: boolean; path: string }[]; delay: number }[] = [];
+  let current: (typeof groups)[number] | null = null,
+    lastWasAgent = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/#.*/, '').trim();
     if (!line) continue;
-    const [key, ...rest] = line.split(':'),
-      value = rest.join(':').trim(),
-      k = key.trim().toLowerCase();
-    if (k === 'user-agent') {
-      if (sawRule) relevant = false;
-      sawRule = false;
-      relevant ||= value === '*' || /locumradar/i.test(value);
+    const at = line.indexOf(':');
+    if (at < 0) continue;
+    const key = line.slice(0, at).trim().toLowerCase(),
+      value = line.slice(at + 1).trim();
+    if (key === 'user-agent') {
+      if (!current || !lastWasAgent) groups.push((current = { agents: [], rules: [], delay: 0 }));
+      current.agents.push(value.toLowerCase());
+      lastWasAgent = true;
       continue;
     }
-    sawRule = true;
-    if (!relevant) continue;
-    if (k === 'disallow' && value) disallowed.push(value);
-    if (k === 'crawl-delay' && Number(value) > 0) delay = Math.max(delay, Number(value) * 1000);
+    lastWasAgent = false;
+    if (!current) continue;
+    if ((key === 'allow' || key === 'disallow') && value)
+      current.rules.push({ allow: key === 'allow', path: value });
+    if (key === 'crawl-delay' && Number(value) > 0)
+      current.delay = Math.max(current.delay, Number(value) * 1000);
   }
-  const matches = (rule: string, path: string) => {
-    const pattern = new RegExp(
+  const own = groups.filter((g) => g.agents.some((a) => a && 'locumradar'.includes(a) && a !== '*'));
+  const chosen = own.length ? own : groups.filter((g) => g.agents.includes('*'));
+  const rules = chosen.flatMap((g) => g.rules);
+  const delay = Math.max(0, ...chosen.map((g) => g.delay));
+  const compiled = rules.map((r) => ({
+    ...r,
+    length: r.path.replace(/\*/g, '').length,
+    re: new RegExp(
       '^' +
-        rule
+        r.path
           .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
           .replace(/\*/g, '.*')
           .replace(/\\\$$/, '$'),
-    );
-    return pattern.test(path);
+    ),
+  }));
+  const allowed = (path: string) => {
+    let best: (typeof compiled)[number] | null = null;
+    for (const r of compiled)
+      if (r.re.test(path) && (!best || r.length > best.length || (r.length === best.length && r.allow)))
+        best = r;
+    return !best || best.allow;
   };
-  return paths.some((p) => disallowed.some((rule) => matches(rule, p))) ? null : delay;
+  return { allowed, delay };
+}
+/**
+ * Path-aware robots check for adapters with recorded permission: the crawl
+ * delay in milliseconds, or null when any needed path is disallowed.
+ */
+export function robotsDelayFor(text: string, paths: string[]): number | null {
+  const robots = parseRobots(text);
+  if (!robots) return null;
+  return paths.every((p) => robots.allowed(p)) ? robots.delay : null;
 }
 
 const knownExternalIds = (s: Store, sourceId: string) =>
@@ -189,12 +212,17 @@ const knownExternalIds = (s: Store, sourceId: string) =>
   ]);
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Profile scope: preferred specialties and excluded states, when the profile sets them. */
-export function inProfileScope(profile: Profile, specialty: string | null, state: string | null) {
-  if (state && (profile.excludedStates as string[]).includes(state)) return false;
-  if (specialty && profile.preferredSpecialties.length)
-    return (profile.preferredSpecialties as string[]).includes(specialty);
-  return true;
+/**
+ * Discovery is national and cross-specialty (LR-001): nothing is skipped for
+ * being outside the profile. Relevance only orders work when a source must be
+ * read over several runs, so the jobs most likely to matter arrive first.
+ * 3 = preferred specialty in an allowed state, 0 = excluded state.
+ */
+export function profileRelevance(profile: Profile, specialty: string | null, state: string | null) {
+  if (state && (profile.excludedStates as string[]).includes(state)) return 0;
+  if (specialty && (profile.preferredSpecialties as string[]).includes(specialty)) return 3;
+  if (specialty && (profile.competentSpecialties as string[]).includes(specialty)) return 2;
+  return 1;
 }
 
 /**
@@ -233,42 +261,69 @@ export const describeTally = (t: { imported: number; unchanged: number; queued: 
  * Runs one adapter. Paged adapters go newest first and stop at the first page
  * whose vacancies have all been seen before, so routine runs are short.
  */
-async function runAdapter(adapter: SourceAdapter, sourceId: string) {
+async function runAdapter(adapter: SourceAdapter, sourceId: string, dryRun = false) {
   const store = await readStore();
+  // A test run reads a handful of pages to show what the parser makes of the live site.
+  const env: Record<string, string | undefined> = dryRun
+    ? {
+        ...process.env,
+        ONEMEDICAL_DETAIL_LIMIT: '3',
+        [`${sourceId.toUpperCase().replace(/\W/g, '_')}_DETAIL_LIMIT`]: '3',
+        DRY_RUN: 'true',
+      }
+    : process.env;
   const missing = adapter.missingConfig?.(process.env);
   if (missing) throw new Error(`Needs configuration: ${missing}.`);
   let delay = Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 1500);
+  let robotsAllowed: ((path: string) => boolean) | null = null;
   if (adapter.access === 'site-endpoint') {
-    const robots = await fetchPage(adapter.robotsUrl!, 'text/plain');
+    const robotsText = await fetchPage(adapter.robotsUrl!, 'text/plain');
     const paths =
-      'pageUrl' in adapter
+      adapter.robotsPaths ??
+      ('pageUrl' in adapter
         ? [new URL(adapter.pageUrl(1, process.env)!).pathname]
-        : ['/wp-json/wp/v2/job_posts', '/doctors/jobs-board/'];
-    const robotsDelay = robots.status === 200 ? robotsDelayFor(robots.text, paths) : null;
-    if (robots.status !== 404 && robotsDelay === null)
-      throw new Error('Robots rules disallow the pages this collector needs; stopped.');
-    delay = Math.max(delay, robotsDelay ?? 0);
+        : ['/wp-json/wp/v2/job_posts', '/doctors/jobs-board/']);
+    if (robotsText.status === 200) {
+      const robots = parseRobots(robotsText.text);
+      if (!robots || !paths.every((p) => robots.allowed(p)))
+        throw new Error('Robots rules disallow the pages this collector needs; stopped.');
+      robotsAllowed = robots.allowed;
+      delay = Math.max(delay, robots.delay);
+    } else if (robotsText.status !== 404)
+      throw new Error(`Robots file returned HTTP ${robotsText.status}; stopped conservatively.`);
   }
   const seen = knownExternalIds(store, sourceId);
+  const source = store.sources.find((s) => s.id === sourceId);
+  const seenUrls = new Set([
+    ...store.listings.filter((l) => l.sourceId === sourceId && l.url).map((l) => l.url!),
+    ...(source?.readUrls ?? []),
+  ]);
+  const read: string[] = [];
   const say = (text: string, level: 'info' | 'warn' | 'error' = 'info') =>
     log(sourceId, text, level);
-  const get = (url: string, accept: string) => fetchPage(url, accept);
+  const get = (url: string, accept: string) => {
+    // Every request, not only the first, must be allowed by the site's robots rules.
+    if (robotsAllowed && !robotsAllowed(new URL(url).pathname))
+      return Promise.reject(new Error('Disallowed by robots rules'));
+    return fetchPage(url, accept);
+  };
   let blocks: JsonBlock[] = [];
-  let outOfScope = 0;
-  const inScope = (specialty: string | null, state: string | null) =>
-    inProfileScope(store.profile, specialty, state);
+  const relevance = (specialty: string | null, state: string | null) =>
+    profileRelevance(store.profile, specialty, state);
   if ('collect' in adapter) {
     blocks = await adapter.collect({
       get,
       pause: () => pause(delay),
       seen,
-      inScope,
+      seenUrls,
+      markRead: (urls) => read.push(...urls),
+      relevance,
       log: say,
       stopped: stopRequested,
-      env: process.env,
+      env,
     });
   } else {
-    for (let page = 1; page <= adapter.maxPages; page++) {
+    for (let page = 1; page <= (dryRun ? 1 : adapter.maxPages); page++) {
       if (stopRequested()) {
         say(`Stopped on request after ${page - 1} page(s).`, 'warn');
         break;
@@ -324,17 +379,64 @@ async function runAdapter(adapter: SourceAdapter, sourceId: string) {
   for (const b of blocks) {
     const r = fromLabelledBlock(b, sourceId, `${sourceId}-adapter`, store.facilities);
     r.draft.url = b.url;
-    if (!inScope(r.draft.specialty ?? null, r.draft.state ?? null)) {
-      outOfScope++;
-      continue;
-    }
     results.push(r);
   }
-  if (outOfScope)
-    say(
-      `${outOfScope} listings fall outside your profile's specialties or states and were skipped.`,
-    );
-  return results;
+  return { results, read };
+}
+export interface SourceTest {
+  sourceId: string;
+  ok: boolean;
+  message: string;
+  read: number;
+  valid: number;
+  samples: { title: string; valid: boolean; issues: string[]; fields: Record<string, string> }[];
+}
+/**
+ * Qualification run: reads a few live pages through the same adapter, gates and
+ * robots checks as collection, and reports what the parser extracted. Nothing is
+ * saved and the collection interval is not consumed. Permission must still be
+ * recorded, because a test is still access.
+ */
+export async function testSource(sourceId: string): Promise<SourceTest> {
+  const store = await readStore(),
+    source = store.sources.find((s) => s.id === sourceId);
+  const fail = (message: string): SourceTest => ({ sourceId, ok: false, message, read: 0, valid: 0, samples: [] });
+  if (!source) return fail('Unknown source.');
+  const adapter = sourceAdapters[sourceId];
+  if (!adapter) return fail('This source has no automatic collector yet.');
+  if (source.permission !== 'approved' || !source.permissionEvidence.trim())
+    return fail('Record access permission for this source first.');
+  if (process.env.COLLECTOR_ENABLED !== 'true')
+    return fail('Collection is switched off on this installation (COLLECTOR_ENABLED).');
+  try {
+    log(sourceId, `Testing ${source.name} (a few pages; nothing is saved).`);
+    const { results } = await runAdapter(adapter, sourceId, true);
+    const samples = results.slice(0, 8).map((r) => {
+      const parsed = listingInputSchema.safeParse(r.draft);
+      return {
+        title: r.draft.title ?? '(untitled)',
+        valid: parsed.success,
+        issues: r.issues.slice(0, 6),
+        fields: {
+          Facility: r.draft.facilityName ?? '',
+          Town: r.draft.town ?? '',
+          State: r.draft.state ?? '',
+          Specialty: r.draft.specialty ?? '',
+          Grade: r.draft.grade ?? '',
+          Dates: r.draft.startDate ? `${r.draft.startDate} → ${r.draft.endDate ?? '?'}` : '',
+          Rate: r.draft.compensation?.amount ? `$${r.draft.compensation.amount}/${r.draft.compensation.basis}` : '',
+        },
+      };
+    });
+    const valid = results.filter((r) => listingInputSchema.safeParse(r.draft).success).length;
+    const message = `${results.length} records parsed; ${valid} complete enough to import automatically.`;
+    log(sourceId, `Test: ${message}`);
+    return { sourceId, ok: true, message, read: results.length, valid, samples };
+  } catch (error) {
+    const message = (error as Error).message;
+    log(sourceId, `Test failed: ${message}`, 'error');
+    return fail(message);
+  }
 }
 export async function collectSource(sourceId: string) {
   const state = await readStore(),
@@ -383,12 +485,14 @@ export async function collectSource(sourceId: string) {
   try {
     if (source.method === 'json-api') {
       log(sourceId, `Starting ${source.name}.`);
-      const results = await runAdapter(sourceAdapters[source.id], sourceId);
+      const { results, read } = await runAdapter(sourceAdapters[source.id], sourceId);
       const tally = await transaction((s) => {
         const t = commitExtractions(s, sourceId, results);
         const current = s.sources.find((v) => v.id === sourceId)!;
         current.lastSuccess = startedAt;
         current.error = null;
+        if (read.length)
+          current.readUrls = [...new Set([...(current.readUrls ?? []), ...read])].slice(-5000);
         return t;
       });
       record.count = tally.imported + tally.queued;

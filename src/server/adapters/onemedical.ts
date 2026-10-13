@@ -130,7 +130,8 @@ export const oneMedical: CustomAdapter = {
     const wanted: IndexEntry[] = [];
     let total = 0,
       active = 0;
-    for (let page = 1; page <= 80 && !ctx.stopped(); page++) {
+    const maxIndexPages = ctx.env.DRY_RUN === 'true' ? 1 : 80;
+    for (let page = 1; page <= maxIndexPages && !ctx.stopped(); page++) {
       if (page > 1) await ctx.pause();
       const res = await ctx.get(
         `${BASE}/wp-json/wp/v2/job_posts?per_page=100&page=${page}&_fields=id,link,title`,
@@ -143,15 +144,21 @@ export const oneMedical: CustomAdapter = {
       for (const e of entries) {
         if (!e.end || e.end < today) continue;
         active++;
-        const specialty = classifyRole(e.specialty).specialty;
-        if (!ctx.inScope(specialty, e.state)) continue;
         if (!ctx.seen.has(`1medical-${e.id}`)) wanted.push(e);
       }
       if (entries.length < 100) break;
     }
     const limit = Number(ctx.env.ONEMEDICAL_DETAIL_LIMIT ?? 150);
+    // Everything is collected eventually; the most relevant and soonest jobs come first.
+    const rank = new Map(
+      wanted.map((e) => [e.id, ctx.relevance(classifyRole(e.specialty).specialty, e.state)]),
+    );
+    wanted.sort(
+      (a, b) =>
+        rank.get(b.id)! - rank.get(a.id)! || (a.start ?? '9999').localeCompare(b.start ?? '9999'),
+    );
     ctx.log(
-      `Index: ${total} posts, ${active} active, ${wanted.length} new in your scope; reading up to ${limit} job pages.`,
+      `Index: ${total} posts, ${active} active, ${wanted.length} not yet read; reading up to ${limit} job pages, most relevant first.`,
     );
     const blocks: JsonBlock[] = [];
     for (const entry of wanted.slice(0, limit)) {
@@ -168,7 +175,7 @@ export const oneMedical: CustomAdapter = {
     }
     if (wanted.length > limit)
       ctx.log(
-        `${wanted.length - limit} matching posts remain; they will be read on the next runs (raise ONEMEDICAL_DETAIL_LIMIT to read more at once).`,
+        `${wanted.length - limit} posts remain; they will be read on the next runs (raise ONEMEDICAL_DETAIL_LIMIT to read more at once).`,
         'warn',
       );
     return blocks;

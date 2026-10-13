@@ -5,7 +5,7 @@ import { readStore, transaction } from '@/server/database';
 import { listingInputSchema, profileSchema, stages } from '@/domain/model';
 import { ingest, mergeOpportunities, splitListing } from '@/domain/ingestion';
 import { previewImport } from '@/server/extraction';
-import { collectSource } from '@/server/collectors';
+import { collectSource, testSource } from '@/server/collectors';
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
 import { clientView } from '@/server/views';
@@ -38,6 +38,7 @@ const commandSchema = z.discriminatedUnion('command', [
     enabled: z.boolean(),
   }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
+  z.object({ command: z.literal('test-source'), sourceId: z.string() }),
   z.object({ command: z.literal('prepare') }),
   z.object({ command: z.literal('stop') }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
         ),
       );
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
+    if (body.command === 'test-source') return NextResponse.json(await testSource(body.sourceId));
     if (body.command === 'prepare') return NextResponse.json(await prepareCollection());
     if (body.command === 'stop') {
       requestStop();

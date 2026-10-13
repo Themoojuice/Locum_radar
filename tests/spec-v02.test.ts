@@ -439,3 +439,44 @@ describe('profile migration', () => {
     expect(p.pgy).toBe(4);
   });
 });
+
+describe('cross-agency reconciliation', () => {
+  it('queues near-date adverts from different agencies, merges on review, and splits back', async () => {
+    const { mergeOpportunities, splitListing } = await import('@/domain/ingestion');
+    const s = store();
+    const a = ingest(s, base({ reference: '', roster: '' }), now);
+    const b = ingest(
+      s,
+      base({
+        sourceId: '1medical',
+        externalId: 'OM-77',
+        reference: '',
+        roster: '',
+        startDate: '2027-01-12',
+        endDate: '2027-01-25',
+        compensation: { ...base().compensation, amount: 182 },
+      }),
+      now,
+    );
+    expect(b.opportunityId).not.toBe(a.opportunityId);
+    const review = s.reviews.find((r) => r.kind === 'possible duplicate')!;
+    expect(review.reason).toMatch(/within three days/);
+    // One alert for the vacancy, not two.
+    s.profile.alertScore = 0;
+    expect(deriveAlerts(s, evaluate(s, now), now).filter((x) => x.kind === 'new-high')).toHaveLength(1);
+    mergeOpportunities(s, b.opportunityId, a.opportunityId);
+    const merged = s.opportunities.find((o) => o.id === a.opportunityId)!;
+    expect([merged.startDate, merged.endDate]).toEqual(['2027-01-11', '2027-01-25']);
+    expect(s.offers.filter((o) => o.opportunityId === merged.id)).toHaveLength(2);
+    const listing = s.listings.find((l) => l.externalId === 'OM-77')!;
+    const childId = splitListing(s, listing.id);
+    const child = s.opportunities.find((o) => o.id === childId)!;
+    expect([child.startDate, child.endDate]).toEqual(['2027-01-12', '2027-01-25']);
+  });
+  it('does not pair a vacancy with a different block a week later', () => {
+    const s = store();
+    ingest(s, base({ reference: '' }), now);
+    ingest(s, base({ sourceId: '1medical', externalId: 'Z', reference: '', startDate: '2027-01-18', endDate: '2027-01-31' }), now);
+    expect(s.reviews).toHaveLength(0);
+  });
+});

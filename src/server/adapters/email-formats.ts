@@ -79,23 +79,45 @@ export function classifyRole(role: string): {
 } {
   const notes: string[] = [];
   let specialty: Specialty | null = null;
-  if (/psych/i.test(role)) specialty = 'Psychiatry';
-  else if (/\bICU\b|intensive care/i.test(role)) specialty = 'Intensive care';
-  else if (/\bED\b/.test(role) || /emergency/i.test(role)) specialty = 'Emergency medicine';
-  else if (/rural generalist/i.test(role)) specialty = 'Rural generalist';
-  else if (
-    /surg|paed|obstet|\bO&G\b|gynae|oncol|cardio|geriat|rehab|radiat|\bHITH\b|hospital in the home|anaes|palliat|gastro|subacute|orthop|renal|neuro|respir|haemat|infectious|addiction|correctional/i.test(
-      role,
-    )
-  ) {
+  // Order matters: the most specific discipline wins ("Paediatric ED" is emergency work,
+  // "Forensic psychiatry" is psychiatry, "Addiction psychiatry" is psychiatry).
+  const rules: [RegExp, Specialty][] = [
+    [/psych/i, 'Psychiatry'],
+    [/\bICU\b|intensive care|critical care/i, 'Intensive care'],
+    [/\bED\b|emergency|\bFACEM\b/i, 'Emergency medicine'],
+    [/rural generalist|\bRG\b/i, 'Rural generalist'],
+    [/ana?esth/i, 'Anaesthetics'],
+    [/obstet|\bO&G\b|\bO ?& ?G\b|gyna?e|maternity|women'?s health/i, 'Obstetrics & gynaecology'],
+    [/\bpa?ediat|\bpaeds?\b|child health|neonat/i, 'Paediatrics'],
+    [/surg|orthop|urolog|\bENT\b|otolaryng|plastic|vascular|ophthalm/i, 'Surgery'],
+    [/\bGP\b|general practi|primary care|\bAMS\b|aboriginal medical service/i, 'General practice'],
+    [/geriat|aged care|older person/i, 'Geriatric medicine'],
+    [/rehab/i, 'Rehabilitation'],
+    [/palliat/i, 'Palliative care'],
+    [/oncol|radiation therapy/i, 'Oncology'],
+    [/radiol|imaging/i, 'Radiology'],
+    [/addiction|drug and alcohol|\bAOD\b|alcohol and other drugs/i, 'Addiction medicine'],
+    [
+      /cardio|gastro|renal|nephro|neurolog|respir|thoracic|haemat|infectious|endocrin|rheumat|dermat|immunol|\bHITH\b|hospital in the home|subacute/i,
+      'Medical subspecialties',
+    ],
+  ];
+  for (const [pattern, name] of rules)
+    if (pattern.test(role)) {
+      specialty = name;
+      break;
+    }
+  if (!specialty && /\b(gen(?:eral)? ?med(?:icine)?|med|medical|medicine|physician)\b/i.test(role))
+    specialty = 'General medicine';
+  if (!specialty && /correctional|prison|custod|sexual health|public health|occupational/i.test(role)) {
     specialty = 'Other';
     notes.push(`Specialty mapped to Other from "${role}".`);
-  } else if (/\b(gen(?:eral)? ?med(?:icine)?|med|medical|medicine)\b/i.test(role))
-    specialty = 'General medicine';
+  }
   let grade: Grade | null = null;
   if (/\bSRMO\b|senior RMO|senior resident/i.test(role)) grade = 'SRMO';
   else if (/\bPHO\b|principal house officer/i.test(role)) grade = 'PHO';
   else if (/\bCMO\b|career medical officer/i.test(role)) grade = 'CMO';
+  else if (/\bSMO\b|senior medical officer/i.test(role)) grade = 'SMO';
   else if (/\bReg(?:istrar)?\b/i.test(role)) grade = 'Registrar';
   else if (/\b(consultant|specialist|FACEM|VMO)\b/i.test(role)) grade = 'Consultant';
   else if (/\bGP\b|general practitioner/i.test(role)) grade = 'GP';
