@@ -3485,3 +3485,7 @@ svg.trend {
 .source-table td:has(.error) {
   white-space: normal;
 }
+.panel select.inline-select {
+  width: auto;
+  flex: 0 0 auto;
+}
