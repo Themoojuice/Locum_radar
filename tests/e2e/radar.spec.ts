@@ -4,6 +4,10 @@ import { listingInputSchema } from '../../src/domain/model';
 import { emptyStore } from '../../src/domain/seed';
 import { collectionPlan } from '../../src/domain/collection';
 
+const webSources = emptyStore().sources.filter(
+  (s) => s.type === 'agency' || s.type === 'government',
+).length;
+
 test('example workspace: filter, compare, inspect unknowns and navigate', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -12,12 +16,18 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await expect(page.getByRole('heading', { name: 'Find your next chapter.' })).toBeVisible();
   await expect(page.getByText('Fictional vacancies and a sample doctor profile.')).toBeVisible();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await expect(coverage.getByText('0 / 14', { exact: true })).toBeVisible();
+  await expect(coverage.getByText(`0 / ${webSources}`, { exact: true })).toBeVisible();
   await expect(coverage.getByRole('button', { name: 'Fetch active vacancies' })).toBeDisabled();
-  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
+  await coverage
+    .getByText(`View all ${webSources} sources and remaining work`, { exact: true })
+    .click();
   await expect(coverage.getByText('Medrecruit', { exact: true })).toBeVisible();
-  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(14);
-  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
+  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(
+    webSources,
+  );
+  await coverage
+    .getByText(`View all ${webSources} sources and remaining work`, { exact: true })
+    .click();
   await page.screenshot({ path: 'test-results/radar-desktop.png', fullPage: true });
   await page.getByRole('textbox', { name: 'Search opportunities' }).fill('Cairns');
   await expect(page.locator('.job-card')).toHaveCount(1);
@@ -40,9 +50,10 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await page.getByRole('button', { name: 'Compare opportunities', exact: true }).click();
   await expect(page.getByRole('table')).toBeVisible();
   await expect(page.getByRole('columnheader')).toHaveCount(3);
-  await page.getByRole('navigation').getByRole('button', { name: 'Calendar', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'January 2027' })).toBeVisible();
-  await expect(page.locator('.placement-bar.overlap').first()).toBeVisible();
+  await page.getByRole('navigation').getByRole('button', { name: 'Planner', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Make room for the right work.' })).toBeVisible();
+  await expect(page.locator('.plan-steps li').first()).toBeVisible();
+  await expect(page.locator('.av-band.av-negotiable').first()).toBeVisible();
   await page
     .getByRole('navigation')
     .getByRole('button', { name: /Review queue/ })
@@ -51,16 +62,22 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await expect(page.getByText('Confirm your registration category.')).toHaveCount(0);
   await page.getByRole('navigation').getByRole('button', { name: 'Discover', exact: true }).click();
   await page.getByRole('button', { name: 'Map view', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Map of vacancies' })).toBeVisible();
+  await expect(page.locator('.map-jobs li').first()).toBeVisible();
+  await page.getByRole('navigation').getByRole('button', { name: 'Coverage', exact: true }).click();
   await expect(
-    page.getByRole('img', { name: 'Schematic map of Australian facilities' }),
+    page.getByRole('heading', { name: 'How much of the market can you see?' }),
   ).toBeVisible();
+  await page.getByRole('button', { name: /^Alerts/ }).click();
+  await expect(page.getByRole('complementary', { name: 'Alerts' })).toContainText('Rate change');
+  await page.getByRole('button', { name: 'Close alerts' }).click();
   await page.screenshot({ path: 'test-results/explorer-desktop.png', fullPage: true });
   expect(errors).toEqual([]);
 });
 
 test('bulk search attempts every ready source and continues after a failure', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'salt'].includes(s.id))) {
     source.enabled = true;
     source.permission = 'approved';
     source.permissionEvidence = 'Mock only';
@@ -90,8 +107,8 @@ test('bulk search attempts every ready source and continues after a failure', as
   await expect(coverage.getByRole('status')).toContainText(
     '2 of 2 attempted · 1 succeeded · 1 failed',
   );
-  expect(attempted).toEqual(['medrecruit', 'ochre']);
-  await expect(coverage.getByText('Fixture failure', { exact: false })).toBeVisible();
+  expect(attempted).toEqual(['medrecruit', 'salt']);
+  await expect(coverage.getByText('Fixture failure', { exact: false }).first()).toBeVisible();
 });
 
 test('real workspace: import two sources, preserve offers, save notes and reload', async ({
@@ -114,7 +131,7 @@ test('real workspace: import two sources, preserve offers, save notes and reload
   await page.getByRole('button', { name: 'Import 1 advertisement', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(page.locator('.job-card')).toHaveCount(1);
-  await expect(page.locator('.job-card')).toContainText('Needs verification');
+  await expect(page.locator('.job-card')).toContainText('Verify eligibility');
   await page.getByRole('button', { name: 'Save Cairns Hospital', exact: true }).click();
   await expect(
     page.getByRole('button', { name: 'Unsave Cairns Hospital', exact: true }),
@@ -155,7 +172,7 @@ test('real workspace: import two sources, preserve offers, save notes and reload
 
 test('bulk search can stop after the active source without starting another', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'salt'].includes(s.id))) {
     Object.assign(source, {
       enabled: true,
       permission: 'approved',
@@ -202,6 +219,18 @@ test('mobile layout stays within the viewport and navigation works', async ({ pa
     true,
   );
   await page.screenshot({ path: 'test-results/radar-mobile.png', fullPage: true });
+  for (const view of ['Planner', 'Coverage', 'Map']) {
+    await page.getByRole('button', { name: 'Toggle navigation' }).click();
+    await page
+      .getByRole('navigation')
+      .getByRole('button', { name: new RegExp(`^${view}`) })
+      .click();
+    await page.waitForTimeout(300);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `${view} fits a phone screen`,
+    ).toBe(true);
+  }
   await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'My profile & preferences', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Make this radar yours.' })).toBeVisible();

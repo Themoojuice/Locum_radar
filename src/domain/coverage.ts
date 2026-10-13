@@ -17,11 +17,17 @@ const median = (v: number[]) => {
 const today = (now: Date) => localDate(now, 'Australia/Brisbane');
 
 /** Active = not withdrawn/filled and not yet ended. */
+/** Example records count only in a workspace made entirely of examples. */
+const counts = (store: Store) => {
+  const examplesOnly = store.opportunities.length > 0 && store.opportunities.every((o) => o.demo);
+  return (o: { demo: boolean }) => examplesOnly || !o.demo;
+};
 function activeOpportunityIds(store: Store, now: Date) {
   const t = today(now);
+  const include = counts(store);
   return new Set(
     store.opportunities
-      .filter((o) => !o.demo && o.endDate >= t && !['filled', 'withdrawn'].includes(o.status))
+      .filter((o) => include(o) && o.endDate >= t && !['filled', 'withdrawn'].includes(o.status))
       .map((o) => o.id),
   );
 }
@@ -114,7 +120,10 @@ export function coverageReport(store: Store, now = new Date()) {
         if (o) facilities.set(o.facilityId, (facilities.get(o.facilityId) ?? 0) + 1);
       }
       const top = (m: Map<string, number>, n = 3) =>
-        [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ name: k, count: v }));
+        [...m.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, n)
+          .map(([k, v]) => ({ name: k, count: v }));
       return {
         id: source.id,
         name: source.name,
@@ -137,7 +146,10 @@ export function coverageReport(store: Store, now = new Date()) {
         topSpecialties: top(specialties),
         topStates: top(stateCounts),
         facilities: facilities.size,
-        topFacilities: top(facilities).map((f) => ({ ...f, name: byFacility.get(f.name)?.name ?? f.name })),
+        topFacilities: top(facilities).map((f) => ({
+          ...f,
+          name: byFacility.get(f.name)?.name ?? f.name,
+        })),
       };
     })
     .sort((a, b) => b.active - a.active);
@@ -150,7 +162,14 @@ export function coverageReport(store: Store, now = new Date()) {
       let m = 0;
       for (const id of A) if (B.has(id)) m++;
       if (A.size < 5 || B.size < 5 || m < 3) continue;
-      pairs.push({ a: sourceIds[i], b: sourceIds[j], n1: A.size, n2: B.size, m, ...chapman(A.size, B.size, m) });
+      pairs.push({
+        a: sourceIds[i],
+        b: sourceIds[j],
+        n1: A.size,
+        n2: B.size,
+        m,
+        ...chapman(A.size, B.size, m),
+      });
     }
   // The best-supported pair (most overlap) drives the headline; others are shown alongside.
   const best = [...pairs].sort((x, y) => y.m - x.m)[0] ?? null;
@@ -175,7 +194,9 @@ export function coverageReport(store: Store, now = new Date()) {
     const directory = store.facilities.filter(
       (f) => f.state === state && f.id.startsWith('aihw-') && f.sector !== 'private',
     );
-    const observed = store.facilities.filter((f) => f.state === state && observedFacilities.has(f.id));
+    const observed = store.facilities.filter(
+      (f) => f.state === state && observedFacilities.has(f.id),
+    );
     return {
       state,
       publicHospitals: directory.length,
@@ -205,7 +226,10 @@ export type CoverageReport = ReturnType<typeof coverageReport>;
 /* --------------------------------------------------------- facility intelligence */
 
 export function facilityIntelligence(store: Store, facility: Facility, now = new Date()) {
-  const opportunities = store.opportunities.filter((o) => o.facilityId === facility.id && !o.demo);
+  const include = counts(store);
+  const opportunities = store.opportunities.filter(
+    (o) => o.facilityId === facility.id && include(o),
+  );
   const ids = new Set(opportunities.map((o) => o.id));
   const offers = store.offers.filter((o) => ids.has(o.opportunityId));
   const rates = offers
@@ -215,20 +239,34 @@ export function facilityIntelligence(store: Store, facility: Facility, now = new
   const sources = new Map<string, number>();
   for (const o of offers) sources.set(o.sourceId, (sources.get(o.sourceId) ?? 0) + 1);
   const specialties = new Map<string, number>();
-  for (const o of opportunities) specialties.set(o.specialty, (specialties.get(o.specialty) ?? 0) + 1);
+  for (const o of opportunities)
+    specialties.set(o.specialty, (specialties.get(o.specialty) ?? 0) + 1);
   const t = today(now);
   return {
     total: opportunities.length,
-    active: opportunities.filter((o) => o.endDate >= t && !['filled', 'withdrawn'].includes(o.status)).length,
+    active: opportunities.filter(
+      (o) => o.endDate >= t && !['filled', 'withdrawn'].includes(o.status),
+    ).length,
     months: months.size,
     recurring: months.size >= 3,
     rate: rates.length
-      ? { min: Math.min(...rates), median: median(rates)!, max: Math.max(...rates), n: rates.length }
+      ? {
+          min: Math.min(...rates),
+          median: median(rates)!,
+          max: Math.max(...rates),
+          n: rates.length,
+        }
       : null,
     sources: [...sources.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([id, count]) => ({ id, name: store.sources.find((s) => s.id === id)?.name ?? id, count })),
-    specialties: [...specialties.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+      .map(([id, count]) => ({
+        id,
+        name: store.sources.find((s) => s.id === id)?.name ?? id,
+        count,
+      })),
+    specialties: [...specialties.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count })),
     firstSeen: opportunities.map((o) => o.firstSeenAt).sort()[0] ?? null,
   };
 }
@@ -250,8 +288,9 @@ export function marketTrends(store: Store, specialty?: string) {
     list.push(h);
     offersBy.set(o.opportunityId, list);
   }
+  const include = counts(store);
   for (const o of store.opportunities) {
-    if (o.demo || (specialty && o.specialty !== specialty)) continue;
+    if (!include(o) || (specialty && o.specialty !== specialty)) continue;
     const key = o.startDate.slice(0, 7);
     const entry = byMonth.get(key) ?? { count: 0, rates: [] };
     entry.count++;
@@ -261,5 +300,10 @@ export function marketTrends(store: Store, specialty?: string) {
   }
   return [...byMonth.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([month, v]) => ({ month, count: v.count, medianHourly: median(v.rates), rated: v.rates.length }));
+    .map(([month, v]) => ({
+      month,
+      count: v.count,
+      medianHourly: median(v.rates),
+      rated: v.rates.length,
+    }));
 }

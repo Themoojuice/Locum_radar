@@ -175,15 +175,57 @@ export function emptyStore(): Store {
         'json-api',
         'Aggregator; discovery leads only',
       ),
-      source('ochre', 'Ochre Recruitment', 'https://ochrerecruitment.com/locum-jobs', 'agency', 'manual', 'Needs an HTML adapter'),
-      source('medlo', 'Medlo', 'https://medlo.com.au/locum-jobs', 'agency', 'manual', 'Direct-booking platform with shift-level rates'),
-      source('statdoctor', 'StatDoctor', 'https://statdoctor.app/', 'agency', 'manual', 'App-only direct booking; use its emails'),
-      source('healthcare-australia', 'Healthcare Australia / Medic Oncall', 'https://www.healthcareaustralia.com.au/', 'agency', 'manual', 'National agency; ask for a feed'),
+      source(
+        'ochre',
+        'Ochre Recruitment',
+        'https://ochrerecruitment.com/locum-jobs',
+        'agency',
+        'manual',
+        'Needs an HTML adapter',
+      ),
+      source(
+        'medlo',
+        'Medlo',
+        'https://medlo.com.au/locum-jobs',
+        'agency',
+        'manual',
+        'Direct-booking platform with shift-level rates',
+      ),
+      source(
+        'statdoctor',
+        'StatDoctor',
+        'https://statdoctor.app/',
+        'agency',
+        'manual',
+        'App-only direct booking; use its emails',
+      ),
+      source(
+        'healthcare-australia',
+        'Healthcare Australia / Medic Oncall',
+        'https://www.healthcareaustralia.com.au/',
+        'agency',
+        'manual',
+        'National agency; ask for a feed',
+      ),
       source('skilled', 'Skilled Medical', 'https://skilledmedical.com/'),
       source('cmr', 'Cornerstone Medical Recruitment', 'https://www.cmr.com.au/'),
       source('charterhouse', 'Charterhouse Medical', 'https://www.charterhousemedical.com/'),
-      source('qld-health', 'Queensland Health', 'https://smartjobs.qld.gov.au/', 'government', 'manual', 'Mostly employed roles'),
-      source('nsw-health', 'NSW Health', 'https://jobs.health.nsw.gov.au/', 'government', 'manual', 'Mostly employed roles'),
+      source(
+        'qld-health',
+        'Queensland Health',
+        'https://smartjobs.qld.gov.au/',
+        'government',
+        'manual',
+        'Mostly employed roles',
+      ),
+      source(
+        'nsw-health',
+        'NSW Health',
+        'https://jobs.health.nsw.gov.au/',
+        'government',
+        'manual',
+        'Mostly employed roles',
+      ),
     ],
     opportunities: [],
     offers: [],
@@ -214,7 +256,12 @@ export function demoStore(): Store {
     availability: [
       { start: '2027-01-01', end: '2027-12-31', kind: 'available', note: '' },
       { start: '2027-02-01', end: '2027-02-14', kind: 'negotiable', note: 'Example rotation week' },
-      { start: '2027-06-01', end: '2027-06-30', kind: 'provisional-leave', note: 'Leave requested' },
+      {
+        start: '2027-06-01',
+        end: '2027-06-30',
+        kind: 'provisional-leave',
+        note: 'Leave requested',
+      },
     ],
   };
   s.sources = [
@@ -261,7 +308,10 @@ export function demoStore(): Store {
       f.adventure = adventure;
       f.adventureNote = 'Illustrative personal preference, not measured biodiversity data';
       f.coverage = 'observed';
-      const stamp = '2026-10-12T22:00:00.000Z';
+      // Example ages are relative to today so the workspace never looks stale.
+      const stamp = new Date(Date.now() - 86400000).toISOString();
+      // Most examples were first seen weeks ago; two are new, to show the "new" state.
+      const first = i < 2 ? stamp : new Date(Date.now() - 21 * 86400000).toISOString();
       const requirements =
         i === 6
           ? { ...unknownRequirements }
@@ -287,7 +337,7 @@ export function demoStore(): Store {
         reference: `EXAMPLE-${i}`,
         requirements,
         status: 'advertised',
-        firstSeenAt: stamp,
+        firstSeenAt: first,
         lastSeenAt: stamp,
         verifiedAt: null,
         demo: true,
@@ -371,6 +421,45 @@ export function demoStore(): Store {
       }
     },
   );
+  // A few example events so the alerts drawer has something to show.
+  const ago = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
+  s.events = [
+    {
+      id: 'demo-e1',
+      at: ago(30),
+      opportunityId: 'demo-1',
+      kind: 'new',
+      sourceId: 'demo-a',
+      detail: 'Emergency medicine Registrar',
+    },
+    {
+      id: 'demo-e2',
+      at: ago(20),
+      opportunityId: 'demo-1',
+      kind: 'new-offer',
+      sourceId: 'demo-b',
+      detail: 'Another source advertises this vacancy.',
+      after: 175,
+    },
+    {
+      id: 'demo-e3',
+      at: ago(6),
+      opportunityId: 'demo-3',
+      kind: 'rate-change',
+      sourceId: 'demo-a',
+      detail: 'Rate changed from $155 to $170.',
+      before: 155,
+      after: 170,
+    },
+    {
+      id: 'demo-e4',
+      at: ago(3),
+      opportunityId: 'demo-0',
+      kind: 'status',
+      sourceId: 'demo-a',
+      detail: 'Recruiter confirmed the roster is days only.',
+    },
+  ];
   s.actions = [
     {
       opportunityId: 'demo-0',

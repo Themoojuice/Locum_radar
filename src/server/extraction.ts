@@ -212,7 +212,9 @@ export function extractText(
       ? 'flexible'
       : /^fixed/i.test(field(text, 'Flexibility') ?? '')
         ? 'fixed'
-        : /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(text)
+        : /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(
+              text,
+            )
           ? 'flexible'
           : 'unknown',
     shifts: [],

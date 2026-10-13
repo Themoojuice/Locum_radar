@@ -6,7 +6,15 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:3100',
     trace: 'retain-on-failure',
-    channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge',
+    // PLAYWRIGHT_EXECUTABLE points at any Chromium build when no Edge or bundled browser exists.
+    ...(process.env.PLAYWRIGHT_EXECUTABLE
+      ? {
+          launchOptions: {
+            executablePath: process.env.PLAYWRIGHT_EXECUTABLE,
+            args: (process.env.PLAYWRIGHT_ARGS ?? '').split(' ').filter(Boolean),
+          },
+        }
+      : { channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge' }),
     viewport: { width: 1440, height: 1000 },
   },
   webServer: {

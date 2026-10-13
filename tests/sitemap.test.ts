@@ -91,28 +91,48 @@ describe('JobPosting pages', () => {
   });
   it('skips nursing, permanent and overseas postings rather than guessing', () => {
     expect(
-      jobPageBlock(page({ ...locum, title: 'Registered Nurse – Theatre', description: 'Locum nursing cover.' }), 'https://a.example/1', 'salt'),
+      jobPageBlock(
+        page({
+          ...locum,
+          title: 'Registered Nurse – Theatre',
+          description: 'Locum nursing cover.',
+        }),
+        'https://a.example/1',
+        'salt',
+      ),
     ).toEqual({ skipped: 'not a doctor role' });
     expect(
       jobPageBlock(
-        page({ ...locum, employmentType: 'FULL_TIME', title: 'Staff Specialist Psychiatrist', description: 'Ongoing role.' }),
+        page({
+          ...locum,
+          employmentType: 'FULL_TIME',
+          title: 'Staff Specialist Psychiatrist',
+          description: 'Ongoing role.',
+        }),
         'https://a.example/2',
         'salt',
       ),
     ).toEqual({ skipped: 'permanent role' });
     expect(
       jobPageBlock(
-        page({ ...locum, jobLocation: { address: { addressLocality: 'Hamilton', addressCountry: 'NZ' } } }),
+        page({
+          ...locum,
+          jobLocation: { address: { addressLocality: 'Hamilton', addressCountry: 'NZ' } },
+        }),
         'https://a.example/3',
         'global-medics',
       ),
     ).toEqual({ skipped: 'outside Australia' });
-    expect(jobPageBlock('<html><body>No data</body></html>', 'https://a.example/4', 'salt')).toEqual({
+    expect(
+      jobPageBlock('<html><body>No data</body></html>', 'https://a.example/4', 'salt'),
+    ).toEqual({
       skipped: 'not a job posting',
     });
   });
   it('leaves dates unknown when the text gives several ranges', () => {
-    expect(placementDates('Block A: 1-14 March 2027. Block B: 5-18 April 2027.', new Date('2026-10-01'))).toBeNull();
+    expect(
+      placementDates('Block A: 1-14 March 2027. Block B: 5-18 April 2027.', new Date('2026-10-01')),
+    ).toBeNull();
     expect(placementDates('Available from 12-18 October 2026', new Date('2026-10-01'))).toEqual({
       start: '2026-10-12',
       end: '2026-10-18',
@@ -124,10 +144,20 @@ describe('JobPosting pages', () => {
     expect(placementDates('Closing date 30 November 2026', new Date('2026-10-01'))).toBeNull();
   });
   it('imports only a single stated AUD hourly or daily rate', () => {
-    expect(salaryRate({ currency: 'AUD', value: { minValue: 2000, maxValue: 2000, unitText: 'DAY' } }).rate).toBe('AUD 2000/day');
-    expect(salaryRate({ currency: 'AUD', value: { minValue: 150, maxValue: 190, unitText: 'HOUR' } }).note).toMatch(/range/);
-    expect(salaryRate({ currency: 'AUD', value: { value: 350000, unitText: 'YEAR' } }).rate).toBeNull();
-    expect(salaryRate({ currency: 'NZD', value: { value: 150, unitText: 'HOUR' } }).note).toMatch(/NZD/);
+    expect(
+      salaryRate({ currency: 'AUD', value: { minValue: 2000, maxValue: 2000, unitText: 'DAY' } })
+        .rate,
+    ).toBe('AUD 2000/day');
+    expect(
+      salaryRate({ currency: 'AUD', value: { minValue: 150, maxValue: 190, unitText: 'HOUR' } })
+        .note,
+    ).toMatch(/range/);
+    expect(
+      salaryRate({ currency: 'AUD', value: { value: 350000, unitText: 'YEAR' } }).rate,
+    ).toBeNull();
+    expect(salaryRate({ currency: 'NZD', value: { value: 150, unitText: 'HOUR' } }).note).toMatch(
+      /NZD/,
+    );
   });
 });
 
@@ -145,7 +175,11 @@ describe('sitemap collector', () => {
         <url><loc>https://agency.example/about/</loc><lastmod>${recent}</lastmod></url>
       </urlset>`,
       'https://agency.example/job/psych-1/': page(locum),
-      'https://agency.example/job/nurse-2/': page({ ...locum, title: 'Registered Nurse', description: 'Locum nurse.' }),
+      'https://agency.example/job/nurse-2/': page({
+        ...locum,
+        title: 'Registered Nurse',
+        description: 'Locum nurse.',
+      }),
     };
     const requested: string[] = [];
     const marked: string[] = [];

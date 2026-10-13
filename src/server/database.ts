@@ -159,7 +159,11 @@ async function load(c: Connection): Promise<Store> {
     snapshots.set(fresh, emptySnapshot());
     return fresh;
   }
-  const store = { version: 1, profile: JSON.parse(profile[0].payload), observations: [] } as unknown as Store;
+  const store = {
+    version: 1,
+    profile: JSON.parse(profile[0].payload),
+    observations: [],
+  } as unknown as Store;
   const snapshot = emptySnapshot();
   for (const [table, key] of tables) {
     const rows = await c.query(`SELECT id, payload FROM ${table}`);

@@ -77,7 +77,8 @@ export type Stage = (typeof stages)[number];
 export type Eligibility =
   'Eligible' | 'Likely eligible' | 'Needs verification' | 'Ineligible' | 'Expired/unavailable';
 export type Scheduling = 'Fits' | 'Fits with conditions' | 'Not set' | 'Conflict';
-export type Logistics = 'Straightforward' | 'Needs arranging' | 'Tight timeline' | 'Unknown' | 'Excluded';
+export type Logistics =
+  'Straightforward' | 'Needs arranging' | 'Tight timeline' | 'Unknown' | 'Excluded';
 export type Urgency = 'Urgent' | 'Near-term' | 'Medium-term' | 'Long-term' | 'Flexible';
 export type Lifecycle =
   | 'Newly discovered'

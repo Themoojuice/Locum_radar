@@ -1,23 +1,20 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Radar,
   Compass,
   Bookmark,
   Columns3,
-  CalendarDays,
+  CalendarRange,
   ShieldQuestion,
-  Radio,
+  Gauge,
   SlidersHorizontal,
   Search,
   Plus,
   ArrowUpRight,
-  MapPin,
-  Plane,
-  House,
   ArrowRight,
   LayoutGrid,
-  Map,
+  Map as MapIcon,
   Check,
   X,
   Download,
@@ -27,168 +24,110 @@ import {
   LogOut,
   Menu,
   Bell,
+  EyeOff,
+  Wand2,
 } from 'lucide-react';
 import { demoStore } from '@/domain/seed';
 import {
+  archivedStages,
   dimensions,
+  grades,
   specialties,
   states,
   type ListingInput,
   type Profile,
   type Stage,
   type Store,
+  type Urgency,
   type Weights,
 } from '@/domain/model';
-import { duration, evaluate, normalisePay, presets, type EvaluatedJob } from '@/domain/engine';
-import { api, Badge, dateLabel, Empty, money, rateLabel } from './shared';
+import {
+  dimensionLabels,
+  duration,
+  evaluate,
+  presetDetails,
+  presets,
+  type HiddenReason,
+} from '@/domain/engine';
+import { deriveAlerts, suggestWeights } from '@/domain/insights';
+import { api, Badge, Empty } from './shared';
 import { ProfileForm } from './profile-form';
 import { ImportDialog } from './import-dialog';
 import { OpportunityDetail } from './opportunity-detail';
-import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
+import { OpportunityCard } from './opportunity-card';
+import { ComparisonView } from './explorer';
+import { MapExplorer } from './map-explorer';
+import { Planner } from './planner';
 import { SourcesView } from './sources-view';
 import { CollectionProgress } from './collection-progress';
+import { AlertsDrawer } from './alerts-drawer';
 
 type View =
-  'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
+  | 'Discover'
+  | 'Shortlist'
+  | 'Map'
+  | 'Compare'
+  | 'Planner'
+  | 'Review queue'
+  | 'Coverage'
+  | 'My profile';
 const nav = [
   { name: 'Discover', icon: Compass },
   { name: 'Shortlist', icon: Bookmark },
+  { name: 'Map', icon: MapIcon },
   { name: 'Compare', icon: Columns3 },
-  { name: 'Calendar', icon: CalendarDays },
+  { name: 'Planner', icon: CalendarRange },
   { name: 'Review queue', icon: ShieldQuestion },
-  { name: 'Sources', icon: Radio },
+  { name: 'Coverage', icon: Gauge },
 ] as const;
-const dimensionNames: Record<keyof Weights, string> = {
-  financial: 'Income',
-  adventure: 'Location & adventure',
-  clinical: 'Clinical interest',
-  logistics: 'Travel & logistics',
-  quality: 'Availability evidence',
+const hiddenLabels: Record<HiddenReason, string> = {
+  ineligible: 'ineligible',
+  expired: 'ended or filled',
+  archived: 'dismissed or closed',
+  'below minimum': 'below your minimum rate',
+  'excluded state': 'in excluded states',
+  'date conflict': 'clash with unavailable dates',
+  'no active offer': 'with no active offer',
 };
-
-function OpportunityCard({
-  job,
-  selected,
-  onSelect,
-  onCompare,
-  onSave,
-}: {
-  job: EvaluatedJob;
-  selected: boolean;
-  onSelect: () => void;
-  onCompare: () => void;
-  onSave: () => void;
-}) {
-  const o = job.opportunity,
-    best =
-      job.activeOffers.find(
-        (offer) =>
-          job.ranking.bestHourly !== null &&
-          normalisePay(offer.compensation).hourly === job.ranking.bestHourly,
-      ) ?? job.activeOffers[0];
-  const saved = job.action && !['Discovered', 'Dismissed', 'Declined'].includes(job.action.stage);
-  return (
-    <article className={`job-card ${selected ? 'selected' : ''}`}>
-      <div className="card-top">
-        <Badge
-          tone={
-            o.specialty === 'Psychiatry'
-              ? 'lavender'
-              : o.specialty === 'Emergency medicine'
-                ? 'sand'
-                : 'blue'
-          }
-        >
-          {o.specialty}
-        </Badge>
-        <button
-          className={`icon-button save-button ${saved ? 'saved' : ''}`}
-          onClick={onSave}
-          aria-label={`${saved ? 'Unsave' : 'Save'} ${job.facility.name}`}
-          aria-pressed={!!saved}
-        >
-          <Bookmark size={19} fill={saved ? 'currentColor' : 'none'} />
-        </button>
-      </div>
-      <div className="card-heading">
-        <button className="card-title" onClick={onSelect}>
-          {job.facility.name}
-        </button>
-        <span className="grade-label">{o.grade}</span>
-      </div>
-      <p className="location">
-        <MapPin size={14} />
-        {job.facility.town}, {job.facility.state}
-        <span>·</span>
-        {o.demo
-          ? 'Example vacancy'
-          : job.ageDays === 0
-            ? 'Observed today'
-            : `Observed ${job.ageDays}d ago`}
-      </p>
-      <div className="card-dates">
-        <CalendarDays size={15} />
-        <span>
-          {dateLabel(o.startDate)} – {dateLabel(o.endDate, true)}
-        </span>
-        <span className="duration">{duration(o)} days</span>
-      </div>
-      <div className="card-pay">
-        <div>
-          <strong>{best ? rateLabel(best.compensation) : 'Rate on enquiry'}</strong>
-          <p>
-            {job.ranking.bestHourly !== null
-              ? `${money(job.ranking.bestHourly)} comparable hourly`
-              : 'Hourly comparison unavailable'}
-          </p>
-        </div>
-        <div
-          className={`score-circle ${!job.rankable ? 'unranked' : ''}`}
-          title={
-            job.rankable
-              ? 'Personal preference score, independent of eligibility'
-              : 'Preference preview only; not ranked as suitable'
-          }
-        >
-          {job.ranking.score ?? '—'}
-          <span>{job.rankable ? 'MATCH' : 'PREVIEW'}</span>
-        </div>
-      </div>
-      <div className="perks">
-        <span>
-          <Plane size={14} />
-          {best?.flights === 'included'
-            ? 'Flights included'
-            : `Flights ${best?.flights || 'unknown'}`}
-        </span>
-        <span>
-          <House size={14} />
-          {best?.accommodation === 'included'
-            ? 'Stay included'
-            : `Stay ${best?.accommodation || 'unknown'}`}
-        </span>
-      </div>
-      <div className="card-evidence">
-        <span className={`status-dot ${job.rankable ? '' : 'amber'}`} />
-        {job.eligibility.status}
-        <span className="evidence-count">{job.ranking.evidence}% scoring evidence</span>
-      </div>
-      <footer className="card-footer">
-        <button className="text-button" onClick={onSelect}>
-          {job.offers.length} offer{job.offers.length === 1 ? '' : 's'}
-          <ArrowUpRight size={14} />
-        </button>
-        <button
-          className={`text-button compare-button ${selected ? 'active' : ''}`}
-          onClick={onCompare}
-          aria-pressed={selected}
-        >
-          {selected ? <Check size={14} /> : <Plus size={14} />}
-          {selected ? 'Comparing' : 'Compare'}
-        </button>
-      </footer>
-    </article>
-  );
+const horizons: (Urgency | '')[] = [
+  '',
+  'Urgent',
+  'Near-term',
+  'Medium-term',
+  'Long-term',
+  'Flexible',
+];
+const trackedStage = (stage?: Stage) =>
+  !!stage && !['Discovered', ...archivedStages].includes(stage);
+/** Feed filters survive reloads (spec §9). Storage can be unavailable; failures are ignored. */
+const FILTER_KEY = 'locum-radar:filters:v2';
+interface Filters {
+  search: string;
+  specialty: string;
+  state: string;
+  horizon: string;
+  grade: string;
+  travel: boolean;
+  reveal: HiddenReason[];
+  eligibility: string;
+}
+const defaultFilters: Filters = {
+  search: '',
+  specialty: 'mine',
+  state: '',
+  horizon: '',
+  grade: '',
+  travel: false,
+  reveal: [],
+  eligibility: '',
+};
+function readFilters(): Filters {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    return raw ? { ...defaultFilters, ...JSON.parse(raw) } : defaultFilters;
+  } catch {
+    return defaultFilters;
+  }
 }
 
 export function RadarApp() {
@@ -199,14 +138,25 @@ export function RadarApp() {
     [loginRequired, setLoginRequired] = useState(false),
     [hasPassword, setHasPassword] = useState(false);
   const [view, setView] = useState<View>('Discover'),
-    [search, setSearch] = useState(''),
-    [specialty, setSpecialty] = useState(''),
-    [state, setState] = useState(''),
-    [eligibility, setEligibility] = useState('suitable'),
-    [year, setYear] = useState('2027'),
-    [travel, setTravel] = useState(false),
-    [grade, setGrade] = useState('');
-  const [display, setDisplay] = useState<'cards' | 'map'>('cards'),
+    // RadarApp renders only in the browser (see page.tsx), so stored filters load on first render.
+    [filters, setFilters] = useState<Filters>(readFilters),
+    [alertsOpen, setAlertsOpen] = useState(false),
+    [dismissedSuggestion, setDismissedSuggestion] = useState(false);
+  const { search, specialty, state, horizon, grade, travel, reveal, eligibility } = filters;
+  const setFilter = useCallback(
+    <K extends keyof Filters>(key: K, value: Filters[K]) =>
+      setFilters((prev) => {
+        const next = { ...prev, [key]: value };
+        try {
+          localStorage.setItem(FILTER_KEY, JSON.stringify(next));
+        } catch {
+          /* Private windows may refuse storage; filters then last for the session. */
+        }
+        return next;
+      }),
+    [],
+  );
+  const [display, setDisplay] = useState<'cards' | 'list'>('cards'),
     [selected, setSelected] = useState<string[]>([]),
     [detail, setDetail] = useState<string | null>(null),
     [importing, setImporting] = useState(false),
@@ -219,7 +169,13 @@ export function RadarApp() {
     [password, setPassword] = useState(''),
     [loginError, setLoginError] = useState('');
   const [extraFilters, setExtraFilters] = useState(false),
-    [savingWeights, setSavingWeights] = useState(false);
+    [savingWeights, setSavingWeights] = useState(false),
+    // National volume: render cards in pages so a phone is not asked to draw thousands.
+    // Paging restarts whenever the filters, view or preset change.
+    [paging, setPaging] = useState({ key: '', count: 60 });
+  const pageKey = JSON.stringify([filters, view, preset]);
+  const visibleCount = paging.key === pageKey ? paging.count : 60;
+  const setVisibleCount = (count: number) => setPaging({ key: pageKey, count });
   async function reload() {
     const r = await fetch('/api/radar', { cache: 'no-store' });
     if (r.status === 401) {
@@ -277,53 +233,68 @@ export function RadarApp() {
     [base, weights],
   );
   const jobs = useMemo(() => (store ? evaluate(store) : []), [store]);
-  const shortlist = jobs.filter(
-    (j) => j.action && !['Discovered', 'Dismissed', 'Declined'].includes(j.action.stage),
+  const alerts = useMemo(() => (store ? deriveAlerts(store, jobs) : []), [store, jobs]);
+  const unreadAlerts = alerts.filter((a) => a.unread).length;
+  const suggestion = useMemo(
+    () => (store && !weights ? suggestWeights(store.profile, jobs) : null),
+    [store, jobs, weights],
   );
+  const shortlist = jobs.filter((j) => trackedStage(j.action?.stage));
   const pendingReviews =
     (store?.reviews.filter((r) => !r.resolved).length || 0) +
-    jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
-  const filtered = jobs.filter((j) => {
+    jobs.filter((j) => j.eligibility.status === 'Needs verification' && j.rankable).length;
+  // Stage 2 (spec §2): broad discovery, but the default feed shows your specialties.
+  const mySpecialties = store
+    ? [...new Set([...store.profile.competentSpecialties, ...store.profile.preferredSpecialties])]
+    : [];
+  const lens = presetDetails[preset]?.lens;
+  const hiddenCounts = new Map<HiddenReason, number>();
+  const matches = (j: (typeof jobs)[number], ignoreHidden = false) => {
     const o = j.opportunity;
-    if (view === 'Shortlist' && !shortlist.includes(j)) return false;
-    if (view !== 'Shortlist' && ['Dismissed', 'Declined'].includes(j.action?.stage || ''))
-      return false;
+    if (view === 'Shortlist' && !trackedStage(j.action?.stage)) return false;
     if (
       search &&
-      !`${j.facility.name} ${j.facility.town} ${o.title} ${o.grade}`
+      !`${j.facility.name} ${j.facility.town} ${o.title} ${o.grade} ${o.specialty}`
         .toLowerCase()
         .includes(search.toLowerCase())
     )
       return false;
     if (
-      (specialty && o.specialty !== specialty) ||
-      (state && j.facility.state !== state) ||
-      (grade && o.grade !== grade)
+      specialty === 'mine'
+        ? mySpecialties.length > 0 && !mySpecialties.includes(o.specialty)
+        : specialty && o.specialty !== specialty
     )
       return false;
-    if (year && (o.startDate > `${year}-12-31` || o.endDate < `${year}-01-01`)) return false;
+    if ((state && j.facility.state !== state) || (grade && o.grade !== grade)) return false;
+    if (horizon && j.urgency !== horizon) return false;
+    if (lens === 'short' && duration(o) > 14) return false;
+    if (lens === 'future' && !['Medium-term', 'Long-term', 'Flexible'].includes(j.urgency))
+      return false;
     if (
       travel &&
-      !j.activeOffers.some((o) => o.flights === 'included' && o.accommodation === 'included')
+      !j.logistics.local &&
+      !j.activeOffers.some((v) => v.flights === 'included' && v.accommodation === 'included')
     )
       return false;
-    if (view !== 'Shortlist' && eligibility === 'suitable' && !j.rankable) return false;
-    if (
-      view !== 'Shortlist' &&
-      eligibility !== 'all' &&
-      eligibility !== 'suitable' &&
-      j.eligibility.status !== eligibility
-    )
-      return false;
+    if (eligibility && j.eligibility.status !== eligibility) return false;
+    if (!ignoreHidden && view !== 'Shortlist') {
+      const blocking = j.hiddenBy.filter((h) => !reveal.includes(h));
+      if (blocking.length) return false;
+    }
     return true;
-  });
+  };
+  const filtered = jobs.filter((j) => matches(j));
+  if (view !== 'Shortlist')
+    for (const j of jobs)
+      if (matches(j, true))
+        for (const h of j.hiddenBy.filter((h) => !reveal.includes(h)))
+          hiddenCounts.set(h, (hiddenCounts.get(h) ?? 0) + 1);
   function changeMode(value: boolean) {
     setDemo(value);
     setWeights(null);
     setSelected([]);
     setDetail(null);
     setView('Discover');
-    setEligibility('suitable');
   }
   function navigate(name: View) {
     setView(name);
@@ -357,13 +328,37 @@ export function RadarApp() {
     setWeights(null);
     setToast(demo ? 'Example profile updated' : 'Your profile was saved');
   }
-  function openImport(draft?: Partial<ListingInput>, id?: string) {
+  async function openImport(draft?: Partial<ListingInput>, id?: string) {
     if (demo) {
       changeMode(false);
+    }
+    // The feed carries a preview of long source text; fetch the full record to edit it.
+    if (id && draft && !draft.rawText) {
+      try {
+        const r = await fetch(`/api/radar/detail?review=${encodeURIComponent(id)}`, {
+          cache: 'no-store',
+        });
+        const v = await r.json();
+        if (r.ok) draft = v.review.draft ?? draft;
+      } catch {
+        /* Fall back to the preview; validation will say what is missing. */
+      }
     }
     setImportDraft(draft);
     setReviewId(id);
     setImporting(true);
+  }
+  async function markAlertsRead() {
+    const at = new Date().toISOString();
+    if (demo) setExample((prev) => ({ ...prev, profile: { ...prev.profile, alertsSeenAt: at } }));
+    else {
+      try {
+        await api({ command: 'alerts-seen', at });
+        await reload();
+      } catch (e) {
+        setToast((e as Error).message);
+      }
+    }
   }
   function exportCsv() {
     const rows = [
@@ -375,9 +370,14 @@ export function RadarApp() {
         'Start',
         'End',
         'Eligibility',
-        'Preference score',
-        'Scoring evidence percent',
+        'Scheduling',
+        'Logistics',
+        'Urgency',
+        'Attractiveness score',
+        'Assessable',
+        'Evidence quality',
         'Comparable hourly AUD',
+        'Offers',
         'Stage',
       ],
       ...jobs.map((j) => [
@@ -388,9 +388,14 @@ export function RadarApp() {
         j.opportunity.startDate,
         j.opportunity.endDate,
         j.eligibility.status,
+        j.scheduling.status,
+        j.logistics.status,
+        j.urgency,
         j.ranking.score ?? '',
-        j.ranking.evidence,
+        j.ranking.assessable ? 'yes' : 'no',
+        j.quality.label,
         j.ranking.bestHourly ?? '',
+        j.activeOffers.length,
         j.action?.stage || 'Discovered',
       ]),
     ];
@@ -494,6 +499,7 @@ export function RadarApp() {
               {name === 'Shortlist' && shortlist.length > 0 && <b>{shortlist.length}</b>}
               {name === 'Compare' && selected.length > 0 && <b>{selected.length}</b>}
               {name === 'Review queue' && pendingReviews > 0 && <b>{pendingReviews}</b>}
+              {name === 'Map' && filtered.length > 0 && <b className="soft">{filtered.length}</b>}
             </button>
           ))}
         </nav>
@@ -558,11 +564,14 @@ export function RadarApp() {
               Private by design
             </span>
             <button
-              className="icon-button"
-              aria-label="View items needing attention"
-              onClick={() => navigate('Review queue')}
+              className="icon-button bell"
+              aria-label={`Alerts${unreadAlerts ? `, ${unreadAlerts} new` : ''}`}
+              onClick={() => setAlertsOpen(true)}
             >
               <Bell size={19} />
+              {unreadAlerts > 0 && (
+                <span className="bell-count">{unreadAlerts > 99 ? '99+' : unreadAlerts}</span>
+              )}
             </button>
             <span className="avatar small-avatar">{demo ? 'EX' : 'ME'}</span>
           </div>
@@ -605,7 +614,7 @@ export function RadarApp() {
                 <>
                   <div className="page-heading">
                     <div>
-                      <p className="eyebrow">YOUR 2027, ON YOUR TERMS</p>
+                      <p className="eyebrow">THE WHOLE COUNTRY, RANKED FOR YOU</p>
                       <h1>
                         {view === 'Shortlist'
                           ? 'The ones worth a closer look.'
@@ -631,51 +640,65 @@ export function RadarApp() {
                   <div className="stats-grid">
                     <div className="stat">
                       <span>
-                        Observed opportunities
+                        Live vacancies
                         <Compass size={17} />
                       </span>
                       <strong>
-                        {jobs.filter((j) => j.eligibility.status !== 'Expired/unavailable').length}
-                        <small>{demo ? 'illustrative examples' : 'from your imports'}</small>
+                        {jobs
+                          .filter((j) => !j.hiddenBy.includes('expired'))
+                          .length.toLocaleString('en-AU')}
+                        <small>{demo ? 'illustrative examples' : 'observed nationally'}</small>
                       </strong>
-                      <p>{store.listings.length} advertisements, reconciled</p>
+                      <p>
+                        {store.listings.length.toLocaleString('en-AU')} advertisements from{' '}
+                        {new Set(store.listings.map((l) => l.sourceId)).size} sources, reconciled
+                      </p>
                     </div>
                     <div className="stat">
                       <span>
-                        Suitable matches
+                        In your feed
                         <Check size={17} />
                       </span>
                       <strong>
-                        {jobs.filter((j) => j.rankable).length}
-                        <small>match your profile</small>
+                        {jobs.filter((j) => j.rankable).length.toLocaleString('en-AU')}
+                        <small>ranked for you</small>
                       </strong>
-                      <p>Eligibility comes before preference</p>
+                      <p>
+                        {
+                          jobs.filter(
+                            (j) => j.rankable && j.eligibility.status === 'Needs verification',
+                          ).length
+                        }{' '}
+                        of them need a requirement checked
+                      </p>
                     </div>
                     <div className="stat">
                       <span>
-                        Worth verifying
+                        Starting soon
                         <ShieldQuestion size={17} />
                       </span>
                       <strong>
-                        {jobs.filter((j) => j.eligibility.status === 'Needs verification').length}
-                        <small>need a closer look</small>
+                        {jobs.filter((j) => j.rankable && j.urgency === 'Urgent').length}
+                        <small>urgent and in your feed</small>
                       </strong>
-                      <button className="text-button" onClick={() => navigate('Review queue')}>
-                        Open review queue <ArrowRight size={13} />
+                      <button
+                        className="text-button"
+                        onClick={() => setFilter('horizon', 'Urgent')}
+                      >
+                        Show urgent jobs <ArrowRight size={13} />
                       </button>
                     </div>
                     <div className="stat">
                       <span>
-                        Source visibility
-                        <Radio size={17} />
+                        What you can see
+                        <Gauge size={17} />
                       </span>
                       <strong>
                         {store.sources.filter((s) => s.lastSuccess).length}
                         <small>sources collected</small>
                       </strong>
-                      <button className="text-button" onClick={() => navigate('Sources')}>
-                        {demo ? 'Example records only' : 'See coverage & gaps'}{' '}
-                        <ArrowRight size={13} />
+                      <button className="text-button" onClick={() => navigate('Coverage')}>
+                        {demo ? 'Example records only' : 'Coverage & gaps'} <ArrowRight size={13} />
                       </button>
                     </div>
                   </div>
@@ -685,26 +708,29 @@ export function RadarApp() {
                       reload={reload}
                       onSettings={() => {
                         setDemo(false);
-                        navigate('Sources');
+                        navigate('Coverage');
                       }}
                     />
                   )}
-                  {!demo && store.profile.registration === 'unknown' && (
-                    <div className="onboarding-note">
-                      <ShieldQuestion size={21} />
-                      <span>
-                        <strong>Let’s establish what’s suitable for you.</strong> Confirm your
-                        registration, grades and supervision needs to build your ranked feed.
-                      </span>
-                      <button
-                        className="button secondary small"
-                        onClick={() => navigate('My profile')}
-                      >
-                        Set up my profile
-                        <ArrowRight size={14} />
-                      </button>
-                    </div>
-                  )}
+                  {!demo &&
+                    (store.profile.registration === 'unknown' ||
+                      !store.profile.competentSpecialties.length) && (
+                      <div className="onboarding-note">
+                        <ShieldQuestion size={21} />
+                        <span>
+                          <strong>Let’s establish what’s suitable for you.</strong> Confirm your
+                          registration, grades and the specialties you work in. Until then every job
+                          shows as “verify”, never as “eligible”.
+                        </span>
+                        <button
+                          className="button secondary small"
+                          onClick={() => navigate('My profile')}
+                        >
+                          Set up my profile
+                          <ArrowRight size={14} />
+                        </button>
+                      </div>
+                    )}
                   <div className="discover-layout">
                     <div className="results-column">
                       <section className="filter-panel" aria-label="Opportunity filters">
@@ -713,8 +739,8 @@ export function RadarApp() {
                           <input
                             aria-label="Search opportunities"
                             value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Search hospitals, places or roles…"
+                            onChange={(e) => setFilter('search', e.target.value)}
+                            placeholder="Search hospitals, towns, specialties or grades…"
                           />
                         </div>
                         <div className="filter-row">
@@ -722,9 +748,12 @@ export function RadarApp() {
                             <span className="sr-only">Specialty</span>
                             <select
                               value={specialty}
-                              onChange={(e) => setSpecialty(e.target.value)}
+                              onChange={(e) => setFilter('specialty', e.target.value)}
                             >
-                              <option value="">All specialties</option>
+                              <option value="mine">
+                                {mySpecialties.length ? 'My specialties' : 'All specialties'}
+                              </option>
+                              <option value="">Every specialty</option>
                               {specialties.map((s) => (
                                 <option key={s}>{s}</option>
                               ))}
@@ -732,7 +761,10 @@ export function RadarApp() {
                           </label>
                           <label className="compact-select">
                             <span className="sr-only">State</span>
-                            <select value={state} onChange={(e) => setState(e.target.value)}>
+                            <select
+                              value={state}
+                              onChange={(e) => setFilter('state', e.target.value)}
+                            >
                               <option value="">Anywhere in Australia</option>
                               {states.map((s) => (
                                 <option key={s}>{s}</option>
@@ -740,11 +772,16 @@ export function RadarApp() {
                             </select>
                           </label>
                           <label className="compact-select">
-                            <span className="sr-only">Year</span>
-                            <select value={year} onChange={(e) => setYear(e.target.value)}>
-                              <option value="2027">2027 placements</option>
-                              <option value="2026">2026 placements</option>
-                              <option value="">All dates</option>
+                            <span className="sr-only">When</span>
+                            <select
+                              value={horizon}
+                              onChange={(e) => setFilter('horizon', e.target.value)}
+                            >
+                              {horizons.map((h) => (
+                                <option key={h} value={h}>
+                                  {h ? (h === 'Flexible' ? 'Flexible dates' : h) : 'Any start date'}
+                                </option>
+                              ))}
                             </select>
                           </label>
                           <button
@@ -758,13 +795,12 @@ export function RadarApp() {
                         {extraFilters && (
                           <div className="extra-filters">
                             <label>
-                              Suitability
+                              Eligibility
                               <select
                                 value={eligibility}
-                                onChange={(e) => setEligibility(e.target.value)}
+                                onChange={(e) => setFilter('eligibility', e.target.value)}
                               >
-                                <option value="suitable">Suitable matches</option>
-                                <option value="all">All records</option>
+                                <option value="">Any</option>
                                 {[
                                   'Eligible',
                                   'Likely eligible',
@@ -778,33 +814,53 @@ export function RadarApp() {
                             </label>
                             <label>
                               Grade
-                              <select value={grade} onChange={(e) => setGrade(e.target.value)}>
+                              <select
+                                value={grade}
+                                onChange={(e) => setFilter('grade', e.target.value)}
+                              >
                                 <option value="">All grades</option>
-                                {['RMO', 'SRMO', 'PHO', 'Registrar', 'CMO', 'Consultant', 'GP'].map(
-                                  (v) => (
-                                    <option key={v}>{v}</option>
-                                  ),
-                                )}
+                                {grades.map((v) => (
+                                  <option key={v}>{v}</option>
+                                ))}
                               </select>
                             </label>
                             <label className="checkbox-row">
                               <input
                                 type="checkbox"
                                 checked={travel}
-                                onChange={(e) => setTravel(e.target.checked)}
+                                onChange={(e) => setFilter('travel', e.target.checked)}
                               />
-                              Flights & stay included
+                              Flights & stay included (or local)
                             </label>
+                            <fieldset className="reveal">
+                              <legend>Also show jobs that are</legend>
+                              {(Object.keys(hiddenLabels) as HiddenReason[]).map((h) => (
+                                <label className="checkbox-row" key={h}>
+                                  <input
+                                    type="checkbox"
+                                    checked={reveal.includes(h)}
+                                    onChange={(e) =>
+                                      setFilter(
+                                        'reveal',
+                                        e.target.checked
+                                          ? [...reveal, h]
+                                          : reveal.filter((v) => v !== h),
+                                      )
+                                    }
+                                  />
+                                  {hiddenLabels[h]}
+                                </label>
+                              ))}
+                            </fieldset>
                             <button
                               className="text-button small"
                               onClick={() => {
-                                setSearch('');
-                                setSpecialty('');
-                                setState('');
-                                setGrade('');
-                                setTravel(false);
-                                setYear('2027');
-                                setEligibility('suitable');
+                                setFilters(defaultFilters);
+                                try {
+                                  localStorage.removeItem(FILTER_KEY);
+                                } catch {
+                                  /* ignore */
+                                }
                               }}
                             >
                               Reset filters
@@ -815,13 +871,10 @@ export function RadarApp() {
                       <div className="results-toolbar">
                         <div>
                           <strong>
-                            {filtered.length}{' '}
-                            {view === 'Shortlist' ? 'saved opportunities' : 'opportunities'}
+                            {filtered.length.toLocaleString('en-AU')}{' '}
+                            {view === 'Shortlist' ? 'tracked opportunities' : 'opportunities'}
                           </strong>
-                          <span>
-                            {' '}
-                            · {eligibility === 'suitable' ? 'ranked for you' : 'filtered records'}
-                          </span>
+                          <span> · ranked for you{lens ? ` · ${preset.toLowerCase()}` : ''}</span>
                         </div>
                         <div className="view-toggle" aria-label="Result display">
                           <button
@@ -832,21 +885,32 @@ export function RadarApp() {
                           >
                             <LayoutGrid size={16} />
                           </button>
-                          <button
-                            aria-label="Map view"
-                            aria-pressed={display === 'map'}
-                            className={display === 'map' ? 'active' : ''}
-                            onClick={() => setDisplay('map')}
-                          >
-                            <Map size={16} />
+                          <button aria-label="Map view" onClick={() => navigate('Map')}>
+                            <MapIcon size={16} />
                           </button>
                         </div>
                       </div>
-                      {display === 'map' ? (
-                        <GeographicExplorer jobs={filtered} store={store} onSelect={setDetail} />
-                      ) : filtered.length ? (
+                      {hiddenCounts.size > 0 && (
+                        <p className="hidden-summary">
+                          <EyeOff size={14} />
+                          Not shown:{' '}
+                          {[...hiddenCounts.entries()].map(([h, n], i) => (
+                            <span key={h}>
+                              {i > 0 && ', '}
+                              <button
+                                className="text-button small"
+                                onClick={() => setFilter('reveal', [...reveal, h])}
+                                title="Show these"
+                              >
+                                {n} {hiddenLabels[h]}
+                              </button>
+                            </span>
+                          ))}
+                        </p>
+                      )}
+                      {filtered.length ? (
                         <div className="job-grid">
-                          {filtered.map((job) => (
+                          {filtered.slice(0, visibleCount).map((job) => (
                             <OpportunityCard
                               key={job.opportunity.id}
                               job={job}
@@ -856,12 +920,7 @@ export function RadarApp() {
                               onSave={() =>
                                 action(
                                   job.opportunity.id,
-                                  job.action?.stage &&
-                                    !['Discovered', 'Dismissed', 'Declined'].includes(
-                                      job.action.stage,
-                                    )
-                                    ? 'Discovered'
-                                    : 'Saved',
+                                  trackedStage(job.action?.stage) ? 'Discovered' : 'Saved',
                                   job.action?.notes || '',
                                 ).catch((e) => setToast(e.message))
                               }
@@ -878,21 +937,25 @@ export function RadarApp() {
                         >
                           <p>
                             {!store.opportunities.length
-                              ? 'Start with a recruiter email or a job advertisement. Review the details once, then compare everything in one place.'
-                              : 'Try broader filters, or check the verification queue for jobs with missing requirements.'}
+                              ? 'Fetch vacancies above, or start with a recruiter email or advertisement.'
+                              : 'Try broader filters or show some of the hidden jobs.'}
                           </p>
-                          <button
-                            className="button primary"
-                            onClick={() =>
-                              store.opportunities.length ? navigate('Review queue') : openImport()
-                            }
-                          >
-                            {store.opportunities.length
-                              ? 'Open review queue'
-                              : 'Import your first opportunity'}
-                            <ArrowRight size={16} />
-                          </button>
+                          {!store.opportunities.length && (
+                            <button className="button primary" onClick={() => openImport()}>
+                              Import your first opportunity
+                              <ArrowRight size={16} />
+                            </button>
+                          )}
                         </Empty>
+                      )}
+                      {filtered.length > visibleCount && (
+                        <button
+                          className="button secondary full"
+                          onClick={() => setVisibleCount(visibleCount + 60)}
+                        >
+                          Show more ({(filtered.length - visibleCount).toLocaleString('en-AU')}{' '}
+                          remaining)
+                        </button>
                       )}
                       <p className="results-footnote">
                         <CircleHelp size={14} />
@@ -927,11 +990,16 @@ export function RadarApp() {
                           </select>
                           <ChevronDown size={15} />
                         </label>
+                        {presetDetails[preset] && (
+                          <p className="small muted preset-note">
+                            {presetDetails[preset].description}
+                          </p>
+                        )}
                         <div className="weight-sliders">
                           {dimensions.map((d) => (
                             <label key={d}>
                               <span>
-                                {dimensionNames[d]}
+                                {dimensionLabels[d]}
                                 <strong>{store.profile.weights[d]}</strong>
                               </span>
                               <input
@@ -954,8 +1022,9 @@ export function RadarApp() {
                           ))}
                         </div>
                         <p className="small ranking-explainer">
-                          Weights are relative. Missing evidence is shown separately. Eligibility
-                          always takes priority.
+                          Weights are relative. Missing evidence is left out, not scored as zero.
+                          Eligibility, dates and logistics are shown separately and never change the
+                          score.
                         </p>
                         <button
                           className="button secondary full"
@@ -974,6 +1043,45 @@ export function RadarApp() {
                           {savingWeights ? 'Saving…' : 'Save this balance'}
                         </button>
                       </section>
+                      {suggestion && !dismissedSuggestion && (
+                        <section className="panel suggestion">
+                          <h3>
+                            <Wand2 size={17} /> Your choices suggest a different balance
+                          </h3>
+                          <p className="small muted">
+                            From {suggestion.basis.liked} jobs you kept and{' '}
+                            {suggestion.basis.dismissed} you dismissed. Nothing changes unless you
+                            apply it.
+                          </p>
+                          <ul className="small">
+                            {suggestion.changes.map((c) => (
+                              <li key={c.dimension}>
+                                <strong>
+                                  {c.label}: {c.from} → {c.to}
+                                </strong>{' '}
+                                <span className="muted">{c.why}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="button-row">
+                            <button
+                              className="button secondary small"
+                              onClick={() => {
+                                setWeights(suggestion.weights);
+                                setPreset('Custom');
+                              }}
+                            >
+                              Try it
+                            </button>
+                            <button
+                              className="text-button small"
+                              onClick={() => setDismissedSuggestion(true)}
+                            >
+                              Not now
+                            </button>
+                          </div>
+                        </section>
+                      )}
                       <section className="adventure-note">
                         <div className="contour-lines" />
                         <Leaf size={24} />
@@ -983,16 +1091,46 @@ export function RadarApp() {
                           <br />
                           looks good on you.
                         </h3>
-                        <p>
-                          Explore the places around the work. Location interests are yours to
-                          define.
-                        </p>
-                        <button className="text-button" onClick={() => setDisplay('map')}>
+                        {store.profile.nature.enabled ? (
+                          <>
+                            <p>
+                              Location scores include {store.profile.nature.label} species recorded
+                              within {store.profile.nature.radiusKm} km of each hospital.
+                            </p>
+                            {!demo && (
+                              <button
+                                className="text-button"
+                                onClick={async () => {
+                                  try {
+                                    const r = await api({ command: 'nature' });
+                                    setToast(r.message);
+                                    await reload();
+                                  } catch (e) {
+                                    setToast((e as Error).message);
+                                  }
+                                }}
+                              >
+                                Refresh nature data <ArrowRight size={15} />
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p>
+                              Turn on the nature lens to fold what lives near each hospital into its
+                              location score.
+                            </p>
+                            <button className="text-button" onClick={() => navigate('My profile')}>
+                              Set up the nature lens <ArrowRight size={15} />
+                            </button>
+                          </>
+                        )}
+                        <button className="text-button" onClick={() => navigate('Map')}>
                           Explore the map <ArrowRight size={15} />
                         </button>
                         <small>
-                          Illustrative location scores in example mode. Biodiversity data is a
-                          future integration.
+                          Atlas of Living Australia occurrence records; recording effort varies by
+                          town.
                         </small>
                       </section>
                       <div className="quiet-note">
@@ -1012,13 +1150,30 @@ export function RadarApp() {
               {view === 'Compare' && (
                 <ComparisonView
                   jobs={jobs.filter((j) => selected.includes(j.opportunity.id))}
+                  store={store}
                   onRemove={compare}
                   onSelect={setDetail}
                 />
               )}
-              {view === 'Calendar' && (
-                <CalendarView
-                  jobs={jobs.filter((j) => j.eligibility.status !== 'Expired/unavailable')}
+              {view === 'Map' && (
+                <>
+                  <div className="page-intro">
+                    <p className="eyebrow">THE MAP</p>
+                    <h1>Where the work is.</h1>
+                    <p>
+                      Showing the {filtered.length.toLocaleString('en-AU')} vacancies that match
+                      your Discover filters.{' '}
+                      <button className="text-button" onClick={() => navigate('Discover')}>
+                        Change filters
+                      </button>
+                    </p>
+                  </div>
+                  <MapExplorer jobs={filtered} store={store} onSelect={setDetail} />
+                </>
+              )}
+              {view === 'Planner' && (
+                <Planner
+                  jobs={jobs.filter((j) => !j.hiddenBy.includes('expired'))}
                   store={store}
                   onSelect={setDetail}
                 />
@@ -1031,7 +1186,7 @@ export function RadarApp() {
                   onSave={saveProfile}
                 />
               )}
-              {view === 'Sources' && (
+              {view === 'Coverage' && (
                 <SourcesView store={store} demo={demo} reload={reload} notify={setToast} />
               )}
               {view === 'Review queue' && (
@@ -1154,7 +1309,7 @@ export function RadarApp() {
                   <Radar size={14} /> LOCUM RADAR
                 </span>
                 <span>Built around the work. And the life around it.</span>
-                <span>Private first draft · v0.1</span>
+                <span>Private workspace · v0.2</span>
               </footer>
             </>
           )}
@@ -1177,6 +1332,18 @@ export function RadarApp() {
           </button>
         </div>
       )}
+      {alertsOpen && store && (
+        <AlertsDrawer
+          alerts={alerts}
+          threshold={store.profile.alertScore}
+          onClose={() => setAlertsOpen(false)}
+          onOpen={(id) => {
+            setAlertsOpen(false);
+            setDetail(id);
+          }}
+          onMarkRead={markAlertsRead}
+        />
+      )}
       {toast && (
         <div className="toast" role="status">
           <span>{toast}</span>
@@ -1198,7 +1365,6 @@ export function RadarApp() {
           onImported={async () => {
             await reload();
             setDemo(false);
-            setEligibility('all');
             setView('Discover');
             setToast('Advertisements imported. Unknown requirements remain in the review queue.');
           }}

@@ -125,7 +125,9 @@ export function parseMedrecruitPage(html: string): { blocks: JsonBlock[]; hasMor
           ['Accommodation', accommodation],
           [
             'Flexibility',
-            /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(description)
+            /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(
+              description,
+            )
               ? 'flexible'
               : null,
           ],

@@ -104,7 +104,11 @@ function index(store: Store): Index {
     push(idx.opportunitiesByRole, role(o.facilityId, o.specialty, o.grade), o);
   }
   for (const o of store.opportunities)
-    push(idx.opportunitiesBySlot, slot(o.facilityId, o.specialty, o.grade, o.startDate, o.endDate), o);
+    push(
+      idx.opportunitiesBySlot,
+      slot(o.facilityId, o.specialty, o.grade, o.startDate, o.endDate),
+      o,
+    );
   store.offers.forEach((o, i) => idx.offerByListing.set(o.listingId, i));
   for (const f of store.facilities)
     for (const n of new Set([f.name, ...f.aliases].map(normaliseName)))
@@ -119,15 +123,12 @@ function push<T>(map: Map<string, T[]>, key: string, value: T) {
 }
 const comparableRate = (c: ListingInput['compensation']) =>
   normalisePay(c).hourly ?? c.amount ?? null;
-function event(
-  store: Store,
-  stamp: string,
-  e: Omit<RadarEvent, 'id' | 'at'>,
-) {
+function event(store: Store, stamp: string, e: Omit<RadarEvent, 'id' | 'at'>) {
   (store.events ??= []).push({ id: randomUUID(), at: stamp, ...e });
 }
 function reconcileStatus(store: Store, id: string, target?: import('./model').Opportunity) {
-  const related = indexes.get(store)?.listingsByOpportunity.get(id) ??
+  const related =
+    indexes.get(store)?.listingsByOpportunity.get(id) ??
     store.listings.filter((l) => l.opportunityId === id);
   target ??= store.opportunities.find((o) => o.id === id)!;
   const confirmed = related.filter((l) => l.status === 'confirmed available');
@@ -150,11 +151,12 @@ function reconcileStatus(store: Store, id: string, target?: import('./model').Op
 
 /** True when this opportunity was created beside a possible duplicate awaiting review. */
 const candidateFor = (store: Store, id: string) =>
-  store.reviews.some((r) => r.kind === 'possible duplicate' && r.opportunityId === id && !r.resolved);
+  store.reviews.some(
+    (r) => r.kind === 'possible duplicate' && r.opportunityId === id && !r.resolved,
+  );
 export function findFacility(store: Store, input: ListingInput): Facility {
-  const named = index(store).facilitiesByName.get(
-    `${input.state}|${normaliseName(input.facilityName)}`,
-  ) ?? [];
+  const named =
+    index(store).facilitiesByName.get(`${input.state}|${normaliseName(input.facilityName)}`) ?? [];
   const match = named.find((f) => normaliseName(f.town) === normaliseName(input.town));
   if (match) return match;
   // Directory hospitals are unique by name within a state; their derived towns
@@ -194,7 +196,9 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     hash = fingerprint(input);
   const idx = index(store);
   const previous = idx.byExternal.get(`${input.sourceId}|${input.externalId}`);
-  const previousOpportunity = previous ? idx.opportunityById.get(previous.opportunityId) : undefined;
+  const previousOpportunity = previous
+    ? idx.opportunityById.get(previous.opportunityId)
+    : undefined;
   if (previous?.contentHash === hash) {
     previous.observedAt = stamp;
     if (previousOpportunity) previousOpportunity.lastSeenAt = stamp;
@@ -258,17 +262,29 @@ export function ingest(store: Store, raw: ListingInput, now = new Date()) {
     idx.opportunityById.set(opportunity.id, opportunity);
     // Another agency's advert for nearly the same dates is a likely duplicate:
     // queue it for review rather than merging on a guess.
-    const near = (idx.opportunitiesByRole.get(role(facility.id, input.specialty, input.grade)) ?? []).find(
+    const near = (
+      idx.opportunitiesByRole.get(role(facility.id, input.specialty, input.grade)) ?? []
+    ).find(
       (o) =>
         !o.demo &&
         o.id !== opportunity!.id &&
         nearDates(o, input) &&
         (idx.listingsByOpportunity.get(o.id) ?? []).some((l) => l.sourceId !== input.sourceId),
     );
-    push(idx.opportunitiesByRole, role(opportunity.facilityId, opportunity.specialty, opportunity.grade), opportunity);
+    push(
+      idx.opportunitiesByRole,
+      role(opportunity.facilityId, opportunity.specialty, opportunity.grade),
+      opportunity,
+    );
     push(
       idx.opportunitiesBySlot,
-      slot(opportunity.facilityId, opportunity.specialty, opportunity.grade, opportunity.startDate, opportunity.endDate),
+      slot(
+        opportunity.facilityId,
+        opportunity.specialty,
+        opportunity.grade,
+        opportunity.startDate,
+        opportunity.endDate,
+      ),
       opportunity,
     );
     const candidate = existing ?? similar[0] ?? near;

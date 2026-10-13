@@ -244,7 +244,8 @@ describe('robots rules (RFC 9309)', () => {
     expect(robotsDelayFor(robots, ['/wp-admin/x'])).toBeNull();
   });
   it('prefers a group naming LocumRadar over the wildcard group', () => {
-    const robots = 'User-agent: *\nDisallow: /\n\nUser-agent: LocumRadar\nAllow: /jobs\nDisallow: /';
+    const robots =
+      'User-agent: *\nDisallow: /\n\nUser-agent: LocumRadar\nAllow: /jobs\nDisallow: /';
     expect(robotsDelayFor(robots, ['/jobs/1'])).toBe(0);
     expect(robotsDelayFor(robots, ['/about'])).toBeNull();
   });

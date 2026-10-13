@@ -38,7 +38,8 @@ export function slimListing(l: SourceListing): SourceListing {
   return meta as SourceListing;
 }
 export function slimReview(r: ReviewItem): ReviewItem & { truncated?: boolean } {
-  const long = (r.rawText?.length ?? 0) > PREVIEW_CHARS || (r.draft?.rawText?.length ?? 0) > PREVIEW_CHARS;
+  const long =
+    (r.rawText?.length ?? 0) > PREVIEW_CHARS || (r.draft?.rawText?.length ?? 0) > PREVIEW_CHARS;
   if (!long) return r;
   return {
     ...r,

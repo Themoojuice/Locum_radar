@@ -109,7 +109,10 @@ export function classifyRole(role: string): {
     }
   if (!specialty && /\b(gen(?:eral)? ?med(?:icine)?|med|medical|medicine|physician)\b/i.test(role))
     specialty = 'General medicine';
-  if (!specialty && /correctional|prison|custod|sexual health|public health|occupational/i.test(role)) {
+  if (
+    !specialty &&
+    /correctional|prison|custod|sexual health|public health|occupational/i.test(role)
+  ) {
     specialty = 'Other';
     notes.push(`Specialty mapped to Other from "${role}".`);
   }

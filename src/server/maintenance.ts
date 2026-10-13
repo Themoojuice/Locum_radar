@@ -91,7 +91,11 @@ export async function prepareCollection() {
   if (process.env.COLLECTOR_ENABLED === 'true' && (await readStore()).profile.nature.enabled) {
     try {
       const r = await enrichBiodiversity();
-      steps.push({ step: 'Nature lens', status: r.checked ? 'success' : 'skipped', message: r.message });
+      steps.push({
+        step: 'Nature lens',
+        status: r.checked ? 'success' : 'skipped',
+        message: r.message,
+      });
     } catch (error) {
       steps.push({ step: 'Nature lens', status: 'failed', message: (error as Error).message });
     }

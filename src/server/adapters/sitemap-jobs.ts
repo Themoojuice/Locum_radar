@@ -71,7 +71,11 @@ const textOf = (html: string) => {
   const $ = load(`<div>${html}</div>`);
   $('br').replaceWith('\n');
   $('p, li, div, h1, h2, h3, h4, tr').append('\n');
-  return $.root().text().replace(/[ \t ]+/g, ' ').replace(/\n\s+/g, '\n').trim();
+  return $.root()
+    .text()
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
 };
 
 const NON_DOCTOR =
@@ -101,7 +105,10 @@ export function placementDates(text: string, anchor: Date): { start: string; end
     'gi',
   );
   for (const m of text.matchAll(worded)) {
-    const r = parseShortRange(m[1].replace(/(\d)(st|nd|rd|th)/g, '$1').replace(/\s+(?:to|until)\s+/i, ' - '), anchor);
+    const r = parseShortRange(
+      m[1].replace(/(\d)(st|nd|rd|th)/g, '$1').replace(/\s+(?:to|until)\s+/i, ' - '),
+      anchor,
+    );
     if (r?.end) found.add(`${r.start}|${r.end}`);
   }
   const valid = [...found].map((v) => v.split('|')).filter(([s, e]) => s <= e);
@@ -118,14 +125,22 @@ export function salaryRate(salary: unknown): { rate: string | null; note: string
     max = Number(value.maxValue ?? value.value);
   const unitName = unit === 'HOUR' ? 'hour' : unit === 'DAY' ? 'day' : null;
   if (currency !== 'AUD') return { rate: null, note: `Salary is in ${currency}; not imported.` };
-  if (!unitName) return { rate: null, note: unit ? `Salary unit "${unit}" is not an hourly or daily rate.` : null };
+  if (!unitName)
+    return {
+      rate: null,
+      note: unit ? `Salary unit "${unit}" is not an hourly or daily rate.` : null,
+    };
   if (!Number.isFinite(min) || min <= 0) return { rate: null, note: null };
   if (Number.isFinite(max) && max !== min)
-    return { rate: null, note: `Rate is a range ($${min}–$${max} per ${unitName}); confirm the actual rate.` };
+    return {
+      rate: null,
+      note: `Rate is a range ($${min}–$${max} per ${unitName}); confirm the actual rate.`,
+    };
   return { rate: `AUD ${min}/${unitName}`, note: null };
 }
 
-export type SkipReason = 'not a job posting' | 'not a doctor role' | 'permanent role' | 'outside Australia';
+export type SkipReason =
+  'not a job posting' | 'not a doctor role' | 'permanent role' | 'outside Australia';
 /** Turns one job page into a labelled block, or explains why it was skipped. */
 export function jobPageBlock(
   html: string,
@@ -147,7 +162,8 @@ export function jobPageBlock(
   if (country && !/^(AU|AUS|Australia)$/i.test(country)) return { skipped: 'outside Australia' };
   const role = classifyRole(`${title} ${str(posting.occupationalCategory)}`);
   const everything = `${title}\n${description}`;
-  if (!role.specialty && !role.grade && !DOCTOR.test(everything)) return { skipped: 'not a doctor role' };
+  if (!role.specialty && !role.grade && !DOCTOR.test(everything))
+    return { skipped: 'not a doctor role' };
   if (NON_DOCTOR.test(title) && !DOCTOR.test(title)) return { skipped: 'not a doctor role' };
   const types = [posting.employmentType].flat().map(str).join(' ');
   if (!/TEMPORARY|CONTRACT|PER_DIEM/i.test(types) && !LOCUM.test(everything))
@@ -161,16 +177,25 @@ export function jobPageBlock(
   const posted = Date.parse(str(posting.datePosted));
   const dates = placementDates(description, Number.isFinite(posted) ? new Date(posted) : now);
   if (!dates)
-    notes.push('Placement dates were not found as a single range in the description; read the advertisement.');
+    notes.push(
+      'Placement dates were not found as a single range in the description; read the advertisement.',
+    );
   const { rate, note } = salaryRate(posting.baseSalary);
   if (note) notes.push(note);
   const identifier = str((posting.identifier as Posting)?.value ?? posting.identifier);
   const tail = url.replace(/\/+$/, '').split('/').pop() ?? url;
-  const flights = /\b(?:flights?|airfares?|return travel)\b[^.\n]{0,40}\b(?:included|provided|covered|paid)\b/i.test(description);
-  const stay = /\baccommodation\b[^.\n]{0,30}\b(?:included|provided|covered|paid)\b/i.test(description);
+  const flights =
+    /\b(?:flights?|airfares?|return travel)\b[^.\n]{0,40}\b(?:included|provided|covered|paid)\b/i.test(
+      description,
+    );
+  const stay = /\baccommodation\b[^.\n]{0,30}\b(?:included|provided|covered|paid)\b/i.test(
+    description,
+  );
   const superPlus = /\+\s?super|plus super/i.test(description),
     superIn = /inc(?:l\.?|luding|lusive of)?\s+super/i.test(description);
-  notes.push(`${sourceId} usually names the town, not the hospital; the facility is matched by town.`);
+  notes.push(
+    `${sourceId} usually names the town, not the hospital; the facility is matched by town.`,
+  );
   const labelled = [
     ['Title', title],
     ['Hospital', town],
@@ -187,7 +212,9 @@ export function jobPageBlock(
     ['Accommodation', stay ? 'included' : null],
     [
       'Flexibility',
-      /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(description)
+      /\bflexible (?:start|dates?)\b|\bdates? (?:are |is )?(?:flexible|negotiable)\b/i.test(
+        description,
+      )
         ? 'flexible'
         : null,
     ],
@@ -197,7 +224,12 @@ export function jobPageBlock(
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
     .map(([k, v]) => `${k}: ${String(v).replace(/\n/g, ' ')}`)
     .join('\n');
-  return { labelled, raw: `${title}\n${town}${state ? `, ${state}` : ''}\n\n${description}`.slice(0, 20000), notes, url };
+  return {
+    labelled,
+    raw: `${title}\n${town}${state ? `, ${state}` : ''}\n\n${description}`.slice(0, 20000),
+    notes,
+    url,
+  };
 }
 
 const DAY = 86400000;
@@ -210,7 +242,11 @@ export function sitemapAdapter(cfg: SitemapConfig): CustomAdapter {
     robotsPaths: cfg.sitemaps.map((u) => new URL(u).pathname),
     async collect(ctx: CollectContext) {
       const maxAge = (cfg.maxAgeDays ?? 45) * DAY,
-        limit = Number(ctx.env[`${cfg.sourceId.toUpperCase().replace(/\W/g, '_')}_DETAIL_LIMIT`] ?? cfg.detailLimit ?? 120);
+        limit = Number(
+          ctx.env[`${cfg.sourceId.toUpperCase().replace(/\W/g, '_')}_DETAIL_LIMIT`] ??
+            cfg.detailLimit ??
+            120,
+        );
       const pending = [...cfg.sitemaps],
         visited = new Set<string>(),
         jobs = new Map<string, string | null>();
@@ -224,7 +260,8 @@ export function sitemapAdapter(cfg: SitemapConfig): CustomAdapter {
         const map = parseSitemap(res.text);
         for (const child of map.sitemaps)
           if (!cfg.childSitemap || cfg.childSitemap.test(child.loc))
-            if (!child.lastmod || Date.now() - Date.parse(child.lastmod) < maxAge) pending.push(child.loc);
+            if (!child.lastmod || Date.now() - Date.parse(child.lastmod) < maxAge)
+              pending.push(child.loc);
         for (const u of map.urls)
           if (cfg.jobUrl.test(u.loc) && (!u.lastmod || Date.now() - Date.parse(u.lastmod) < maxAge))
             jobs.set(u.loc, u.lastmod);
@@ -256,8 +293,12 @@ export function sitemapAdapter(cfg: SitemapConfig): CustomAdapter {
         if ('skipped' in result) skipped[result.skipped] = (skipped[result.skipped] ?? 0) + 1;
         else blocks.push(result);
       }
-      const summary = Object.entries(skipped).map(([k, v]) => `${v} ${k}`).join(', ');
-      ctx.log(`${blocks.length} locum doctor postings read${summary ? `; skipped ${summary}` : ''}.`);
+      const summary = Object.entries(skipped)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      ctx.log(
+        `${blocks.length} locum doctor postings read${summary ? `; skipped ${summary}` : ''}.`,
+      );
       ctx.markRead?.(fresh.slice(0, limit).map(([loc]) => loc));
       if (fresh.length > limit)
         ctx.log(`${fresh.length - limit} job pages remain for the next runs.`, 'warn');

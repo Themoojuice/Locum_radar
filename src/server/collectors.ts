@@ -148,7 +148,8 @@ export function queueExtractions(s: Store, sourceId: string, results: Extraction
  */
 export function parseRobots(text: string) {
   if (!/user-agent\s*:/i.test(text) || /<html/i.test(text)) return null;
-  const groups: { agents: string[]; rules: { allow: boolean; path: string }[]; delay: number }[] = [];
+  const groups: { agents: string[]; rules: { allow: boolean; path: string }[]; delay: number }[] =
+    [];
   let current: (typeof groups)[number] | null = null,
     lastWasAgent = false;
   for (const raw of text.split(/\r?\n/)) {
@@ -171,7 +172,9 @@ export function parseRobots(text: string) {
     if (key === 'crawl-delay' && Number(value) > 0)
       current.delay = Math.max(current.delay, Number(value) * 1000);
   }
-  const own = groups.filter((g) => g.agents.some((a) => a && 'locumradar'.includes(a) && a !== '*'));
+  const own = groups.filter((g) =>
+    g.agents.some((a) => a && 'locumradar'.includes(a) && a !== '*'),
+  );
   const chosen = own.length ? own : groups.filter((g) => g.agents.includes('*'));
   const rules = chosen.flatMap((g) => g.rules);
   const delay = Math.max(0, ...chosen.map((g) => g.delay));
@@ -189,7 +192,10 @@ export function parseRobots(text: string) {
   const allowed = (path: string) => {
     let best: (typeof compiled)[number] | null = null;
     for (const r of compiled)
-      if (r.re.test(path) && (!best || r.length > best.length || (r.length === best.length && r.allow)))
+      if (
+        r.re.test(path) &&
+        (!best || r.length > best.length || (r.length === best.length && r.allow))
+      )
         best = r;
     return !best || best.allow;
   };
@@ -400,7 +406,14 @@ export interface SourceTest {
 export async function testSource(sourceId: string): Promise<SourceTest> {
   const store = await readStore(),
     source = store.sources.find((s) => s.id === sourceId);
-  const fail = (message: string): SourceTest => ({ sourceId, ok: false, message, read: 0, valid: 0, samples: [] });
+  const fail = (message: string): SourceTest => ({
+    sourceId,
+    ok: false,
+    message,
+    read: 0,
+    valid: 0,
+    samples: [],
+  });
   if (!source) return fail('Unknown source.');
   const adapter = sourceAdapters[sourceId];
   if (!adapter) return fail('This source has no automatic collector yet.');
@@ -424,7 +437,9 @@ export async function testSource(sourceId: string): Promise<SourceTest> {
           Specialty: r.draft.specialty ?? '',
           Grade: r.draft.grade ?? '',
           Dates: r.draft.startDate ? `${r.draft.startDate} → ${r.draft.endDate ?? '?'}` : '',
-          Rate: r.draft.compensation?.amount ? `$${r.draft.compensation.amount}/${r.draft.compensation.basis}` : '',
+          Rate: r.draft.compensation?.amount
+            ? `$${r.draft.compensation.amount}/${r.draft.compensation.basis}`
+            : '',
         },
       };
     });

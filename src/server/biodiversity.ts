@@ -29,7 +29,9 @@ export function parseAla(body: unknown): { records: number; species: number } {
   };
   if (!b || typeof b.totalRecords !== 'number') throw new Error('Unexpected ALA response shape');
   const facet = b.facetResults?.find((f) => f.fieldName === 'species');
-  const species = (facet?.fieldResult ?? []).filter((r) => r.label && r.label !== 'Not supplied').length;
+  const species = (facet?.fieldResult ?? []).filter(
+    (r) => r.label && r.label !== 'Not supplied',
+  ).length;
   return { records: b.totalRecords, species };
 }
 /** Log-scaled score relative to the richest facility checked, so one hotspot does not flatten the rest. */
@@ -37,7 +39,9 @@ export function rescore(facilities: Facility[], taxon: string) {
   const checked = facilities.filter((f) => f.biodiversity && f.biodiversity.taxon === taxon);
   const max = Math.max(0, ...checked.map((f) => f.biodiversity!.species));
   for (const f of checked)
-    f.biodiversity!.score = max ? Math.round((Math.log1p(f.biodiversity!.species) / Math.log1p(max)) * 100) : 0;
+    f.biodiversity!.score = max
+      ? Math.round((Math.log1p(f.biodiversity!.species) / Math.log1p(max)) * 100)
+      : 0;
 }
 
 export async function enrichBiodiversity(limit = 40) {
@@ -53,9 +57,15 @@ export async function enrichBiodiversity(limit = 40) {
     f.biodiversity.taxon !== nature.label ||
     f.biodiversity.radiusKm !== nature.radiusKm ||
     Date.now() - Date.parse(f.biodiversity.fetchedAt) > 30 * 86400000;
-  const due = store.facilities.filter((f) => live.has(f.id) && f.lat !== null && stale(f)).slice(0, limit);
-  if (!due.length) return { checked: 0, message: 'Every facility with live vacancies is up to date.' };
-  log('nature', `Counting ${nature.label} species near ${due.length} hospitals (Atlas of Living Australia)…`);
+  const due = store.facilities
+    .filter((f) => live.has(f.id) && f.lat !== null && stale(f))
+    .slice(0, limit);
+  if (!due.length)
+    return { checked: 0, message: 'Every facility with live vacancies is up to date.' };
+  log(
+    'nature',
+    `Counting ${nature.label} species near ${due.length} hospitals (Atlas of Living Australia)…`,
+  );
   const results = new Map<string, { records: number; species: number }>();
   for (const f of due) {
     try {
@@ -75,7 +85,13 @@ export async function enrichBiodiversity(limit = 40) {
     for (const f of s.facilities) {
       const r = results.get(f.id);
       if (r)
-        f.biodiversity = { taxon: nature.label, radiusKm: nature.radiusKm, ...r, score: null, fetchedAt };
+        f.biodiversity = {
+          taxon: nature.label,
+          radiusKm: nature.radiusKm,
+          ...r,
+          score: null,
+          fetchedAt,
+        };
     }
     rescore(s.facilities, nature.label);
   });

@@ -11,7 +11,12 @@ import {
   urgencyOf,
 } from '@/domain/engine';
 import { ingest } from '@/domain/ingestion';
-import { deriveAlerts, enquiryDraft, outstandingQuestions, suggestWeights } from '@/domain/insights';
+import {
+  deriveAlerts,
+  enquiryDraft,
+  outstandingQuestions,
+  suggestWeights,
+} from '@/domain/insights';
 import {
   defaultProfile,
   emptyCompensation,
@@ -100,7 +105,12 @@ describe('v0.2 acceptance criteria', () => {
     ])
       ingest(
         s,
-        base({ sourceId, externalId: ref, startDate: `2027-${month}-01`, endDate: `2027-${month}-14` }),
+        base({
+          sourceId,
+          externalId: ref,
+          startDate: `2027-${month}-01`,
+          endDate: `2027-${month}-14`,
+        }),
         now,
       );
     expect(new Set(s.listings.map((l) => l.sourceId)).size).toBe(3);
@@ -110,7 +120,11 @@ describe('v0.2 acceptance criteria', () => {
     const a = ingest(s, base(), now);
     const b = ingest(
       s,
-      base({ sourceId: '1medical', externalId: 'X-9', compensation: { ...base().compensation, amount: 185 } }),
+      base({
+        sourceId: '1medical',
+        externalId: 'X-9',
+        compensation: { ...base().compensation, amount: 185 },
+      }),
       now,
     );
     expect(b.opportunityId).toBe(a.opportunityId);
@@ -120,7 +134,11 @@ describe('v0.2 acceptance criteria', () => {
   it('3. keeps different roles and blocks at one hospital separate', () => {
     const s = store();
     const a = ingest(s, base(), now);
-    const b = ingest(s, base({ externalId: 'A-2', startDate: '2027-01-25', endDate: '2027-02-07' }), now);
+    const b = ingest(
+      s,
+      base({ externalId: 'A-2', startDate: '2027-01-25', endDate: '2027-02-07' }),
+      now,
+    );
     const c = ingest(s, base({ externalId: 'A-3', grade: 'SRMO', reference: 'CHHHS-PSY-12' }), now);
     expect(new Set([a.opportunityId, b.opportunityId, c.opportunityId]).size).toBe(3);
   });
@@ -135,7 +153,11 @@ describe('v0.2 acceptance criteria', () => {
   it('4b. specialty competence is an eligibility fact, distinct from preference', () => {
     const s = store();
     const icu = ingest(s, base({ specialty: 'Intensive care', externalId: 'I-1' }), now);
-    const ed = ingest(s, base({ specialty: 'Emergency medicine', externalId: 'E-1', reference: 'ED' }), now);
+    const ed = ingest(
+      s,
+      base({ specialty: 'Emergency medicine', externalId: 'E-1', reference: 'ED' }),
+      now,
+    );
     expect(job(s, icu.opportunityId).eligibility.status).toBe('Ineligible');
     // Competent but not preferred: eligible, ranked, lower clinical score.
     const e = job(s, ed.opportunityId);
@@ -157,39 +179,78 @@ describe('v0.2 acceptance criteria', () => {
   it('6. keeps a negotiable conflict ranked and conspicuous; a hard conflict is hidden', () => {
     const s = store();
     const { opportunityId } = ingest(s, base(), now);
-    s.profile.availability.push({ start: '2027-01-15', end: '2027-01-16', kind: 'negotiable', note: 'Clinic' });
+    s.profile.availability.push({
+      start: '2027-01-15',
+      end: '2027-01-16',
+      kind: 'negotiable',
+      note: 'Clinic',
+    });
     let j = job(s, opportunityId);
     expect(j.scheduling.status).toBe('Fits with conditions');
     expect(j.scheduling.reasons.join(' ')).toMatch(/negotiable/i);
     expect(j.rankable).toBe(true);
-    s.profile.availability.push({ start: '2027-01-20', end: '2027-01-20', kind: 'unavailable', note: 'Exam' });
+    s.profile.availability.push({
+      start: '2027-01-20',
+      end: '2027-01-20',
+      kind: 'unavailable',
+      note: 'Exam',
+    });
     j = job(s, opportunityId);
     expect(j.scheduling.status).toBe('Conflict');
     expect(j.hiddenBy).toContain('date conflict');
     expect(j.eligibility.status).toBe('Eligible');
   });
   it('6b. never assumes provisional leave is approved', () => {
-    const p = { ...profile, availability: [...profile.availability, { start: '2027-01-01', end: '2027-01-31', kind: 'provisional-leave' as const, note: '' }] };
+    const p = {
+      ...profile,
+      availability: [
+        ...profile.availability,
+        { start: '2027-01-01', end: '2027-01-31', kind: 'provisional-leave' as const, note: '' },
+      ],
+    };
     const s = store();
     const { opportunityId } = ingest(s, base(), now);
-    const r = assessScheduling(s.opportunities.find((o) => o.id === opportunityId)!, p);
+    const r = assessScheduling(
+      s.opportunities.find((o) => o.id === opportunityId)!,
+      p,
+    );
     expect(r.status).toBe('Fits with conditions');
     expect(r.reasons.join(' ')).toMatch(/not assumed/);
   });
   it('6c. a flexible-dates conflict becomes a condition rather than a block', () => {
     const s = store();
     const { opportunityId } = ingest(s, base({ flexibility: 'flexible' }), now);
-    s.profile.availability.push({ start: '2027-01-20', end: '2027-01-20', kind: 'unavailable', note: '' });
+    s.profile.availability.push({
+      start: '2027-01-20',
+      end: '2027-01-20',
+      kind: 'unavailable',
+      note: '',
+    });
     expect(job(s, opportunityId).scheduling.status).toBe('Fits with conditions');
   });
   it('7. supports current and future placements with configurable urgency', () => {
     const s = store();
-    const soon = ingest(s, base({ externalId: 'S', startDate: '2026-10-20', endDate: '2026-10-27' }), now);
-    const later = ingest(s, base({ externalId: 'L', startDate: '2027-09-01', endDate: '2027-09-14' }), now);
+    const soon = ingest(
+      s,
+      base({ externalId: 'S', startDate: '2026-10-20', endDate: '2026-10-27' }),
+      now,
+    );
+    const later = ingest(
+      s,
+      base({ externalId: 'L', startDate: '2027-09-01', endDate: '2027-09-14' }),
+      now,
+    );
     expect(job(s, soon.opportunityId).urgency).toBe('Urgent');
     expect(job(s, later.opportunityId).urgency).toBe('Long-term');
     const o = s.opportunities.find((v) => v.id === soon.opportunityId)!;
-    expect(urgencyOf(o, { ...s.profile, urgency: { urgentDays: 3, nearTermDays: 30, mediumTermDays: 90 } }, now, 'Australia/Brisbane')).toBe('Near-term');
+    expect(
+      urgencyOf(
+        o,
+        { ...s.profile, urgency: { urgentDays: 3, nearTermDays: 30, mediumTermDays: 90 } },
+        now,
+        'Australia/Brisbane',
+      ),
+    ).toBe('Near-term');
   });
   it('8. keeps advertised, calculated and estimated figures distinguishable', () => {
     const s = store();
@@ -210,7 +271,12 @@ describe('v0.2 acceptance criteria', () => {
     expect(noAssumptions.net.value).toBeNull();
     const withCosts = earnings(j.activeOffers[0], j.opportunity, {
       ...s.profile,
-      costs: { returnFlight: 600, nightlyAccommodation: 150, hourlyValueOfTime: null, assumedHoursPerDay: null },
+      costs: {
+        returnFlight: 600,
+        nightlyAccommodation: 150,
+        hourlyValueOfTime: null,
+        assumedHoursPerDay: null,
+      },
     });
     expect(withCosts.flights).toMatchObject({ value: 600, kind: 'estimated' });
     expect(withCosts.accommodation.value).toBe(150 * 14);
@@ -219,8 +285,25 @@ describe('v0.2 acceptance criteria', () => {
   });
   it('9. user-adjusted weights produce predictable changes', () => {
     const s = store();
-    const rich = ingest(s, base({ externalId: 'R', reference: 'R', compensation: { ...base().compensation, amount: 250 } }), now);
-    const nice = ingest(s, base({ externalId: 'N', reference: 'N', specialty: 'Emergency medicine', compensation: { ...base().compensation, amount: 150 } }), now);
+    const rich = ingest(
+      s,
+      base({
+        externalId: 'R',
+        reference: 'R',
+        compensation: { ...base().compensation, amount: 250 },
+      }),
+      now,
+    );
+    const nice = ingest(
+      s,
+      base({
+        externalId: 'N',
+        reference: 'N',
+        specialty: 'Emergency medicine',
+        compensation: { ...base().compensation, amount: 150 },
+      }),
+      now,
+    );
     s.profile.weights = presets['Maximum income'];
     const income = evaluate(s, now).map((j) => j.opportunity.id);
     expect(income.indexOf(rich.opportunityId)).toBeLessThan(income.indexOf(nice.opportunityId));
@@ -248,7 +331,9 @@ describe('v0.2 acceptance criteria', () => {
     expect(j.freshness).toBe('Source unavailable');
     expect(j.lifecycle).toBe('Currently advertised');
     s.sources.find((v) => v.id === 'medrecruit')!.error = null;
-    expect(evaluate(s, later).find((v) => v.opportunity.id === opportunityId)!.lifecycle).toBe('Availability unconfirmed');
+    expect(evaluate(s, later).find((v) => v.opportunity.id === opportunityId)!.lifecycle).toBe(
+      'Availability unconfirmed',
+    );
   });
   it('12. drafts a recruiter enquiry from the evidence without sending it', () => {
     const s = store();
@@ -269,7 +354,11 @@ describe('v0.2 acceptance criteria', () => {
 describe('v0.2 assessments', () => {
   it('flags a start inside the credentialing lead time', () => {
     const s = store();
-    const { opportunityId } = ingest(s, base({ startDate: '2026-10-20', endDate: '2026-10-27' }), now);
+    const { opportunityId } = ingest(
+      s,
+      base({ startDate: '2026-10-20', endDate: '2026-10-27' }),
+      now,
+    );
     const j = job(s, opportunityId);
     expect(j.logistics.status).toBe('Tight timeline');
     expect(j.logistics.reasons[0]).toMatch(/credentialing/);
@@ -277,7 +366,11 @@ describe('v0.2 assessments', () => {
   it('treats a job near home as local, with no travel to arrange', () => {
     const s = store();
     s.profile.homeBase = 'Cairns, QLD';
-    const { opportunityId } = ingest(s, base({ flights: 'not included', accommodation: 'not included' }), now);
+    const { opportunityId } = ingest(
+      s,
+      base({ flights: 'not included', accommodation: 'not included' }),
+      now,
+    );
     const j = job(s, opportunityId);
     expect(j.logistics.local).toBe(true);
     expect(j.logistics.status).toBe('Straightforward');
@@ -290,14 +383,22 @@ describe('v0.2 assessments', () => {
     expect(j.eligibility.status).toBe('Eligible');
     expect(j.hiddenBy).toEqual(['excluded state']);
     const f = s.facilities.find((v) => v.id === j.facility.id)!;
-    expect(assessLogistics(j.opportunity, f, j.activeOffers, s.profile, { now, home: null }).status).toBe('Excluded');
+    expect(
+      assessLogistics(j.opportunity, f, j.activeOffers, s.profile, { now, home: null }).status,
+    ).toBe('Excluded');
   });
   it('rates evidence quality separately from attractiveness', () => {
     const s = store();
     const strong = ingest(s, base({ status: 'confirmed available' }), now);
     const weak = ingest(
       s,
-      base({ externalId: 'W', reference: 'W', roster: '', compensation: { ...emptyCompensation }, requirements: { ...unknownRequirements } }),
+      base({
+        externalId: 'W',
+        reference: 'W',
+        roster: '',
+        compensation: { ...emptyCompensation },
+        requirements: { ...unknownRequirements },
+      }),
       now,
     );
     const q = (id: string) => {
@@ -313,7 +414,11 @@ describe('v0.2 assessments', () => {
     s.profile.preferredSpecialties = [];
     const { opportunityId } = ingest(
       s,
-      base({ compensation: { ...emptyCompensation }, flights: 'unknown', accommodation: 'unknown' }),
+      base({
+        compensation: { ...emptyCompensation },
+        flights: 'unknown',
+        accommodation: 'unknown',
+      }),
       now,
     );
     const r = job(s, opportunityId).ranking;
@@ -327,7 +432,9 @@ describe('v0.2 assessments', () => {
     const f = s.facilities.find((v) => v.id === o.facilityId)!;
     expect(lifecycleOf(o, f, now, undefined, false)).toBe('Newly discovered');
     expect(lifecycleOf(o, f, now, 'Dismissed', false)).toBe('Archived');
-    expect(lifecycleOf({ ...o, status: 'withdrawn' }, f, now, undefined, false)).toBe('Filled or withdrawn');
+    expect(lifecycleOf({ ...o, status: 'withdrawn' }, f, now, undefined, false)).toBe(
+      'Filled or withdrawn',
+    );
     expect(lifecycleOf(o, f, new Date('2027-03-01T00:00:00Z'), undefined, false)).toBe('Expired');
   });
   it('treats a listed shift pattern as the working days', () => {
@@ -343,7 +450,12 @@ describe('v0.2 assessments', () => {
       }),
       now,
     );
-    s.profile.availability.push({ start: '2027-01-15', end: '2027-01-16', kind: 'unavailable', note: '' });
+    s.profile.availability.push({
+      start: '2027-01-15',
+      end: '2027-01-16',
+      kind: 'unavailable',
+      note: '',
+    });
     const j = job(s, opportunityId);
     // The unavailable days fall between shifts, so there is no clash.
     expect(j.scheduling.status).toBe('Fits');
@@ -365,7 +477,15 @@ describe('alerts and suggestions', () => {
     const s = store();
     ingest(s, base(), now);
     ingest(s, base({ compensation: { ...base().compensation, amount: 200 } }), now);
-    ingest(s, base({ sourceId: '1medical', externalId: 'Q', compensation: { ...base().compensation, amount: 230 } }), now);
+    ingest(
+      s,
+      base({
+        sourceId: '1medical',
+        externalId: 'Q',
+        compensation: { ...base().compensation, amount: 230 },
+      }),
+      now,
+    );
     const kinds = deriveAlerts(s, evaluate(s, now), now).map((a) => a.kind);
     expect(kinds).toContain('rate');
     expect(kinds).toContain('better-offer');
@@ -395,7 +515,12 @@ describe('alerts and suggestions', () => {
         }),
         now,
       );
-      s.actions.push({ opportunityId, stage: i < 4 ? 'Saved' : 'Dismissed', notes: '', updatedAt: now.toISOString() });
+      s.actions.push({
+        opportunityId,
+        stage: i < 4 ? 'Saved' : 'Dismissed',
+        notes: '',
+        updatedAt: now.toISOString(),
+      });
     }
     const before = { ...s.profile.weights };
     const suggestion = suggestWeights(s.profile, evaluate(s, now));
@@ -406,7 +531,9 @@ describe('alerts and suggestions', () => {
   it('lists outstanding questions only for facts not established', () => {
     const s = demoStore();
     const j = evaluate(s, now)[0];
-    expect(outstandingQuestions(j)).not.toContain('What is the rate, and on what basis (hourly, daily, per shift)?');
+    expect(outstandingQuestions(j)).not.toContain(
+      'What is the rate, and on what basis (hourly, daily, per shift)?',
+    );
   });
 });
 
@@ -463,7 +590,9 @@ describe('cross-agency reconciliation', () => {
     expect(review.reason).toMatch(/within three days/);
     // One alert for the vacancy, not two.
     s.profile.alertScore = 0;
-    expect(deriveAlerts(s, evaluate(s, now), now).filter((x) => x.kind === 'new-high')).toHaveLength(1);
+    expect(
+      deriveAlerts(s, evaluate(s, now), now).filter((x) => x.kind === 'new-high'),
+    ).toHaveLength(1);
     mergeOpportunities(s, b.opportunityId, a.opportunityId);
     const merged = s.opportunities.find((o) => o.id === a.opportunityId)!;
     expect([merged.startDate, merged.endDate]).toEqual(['2027-01-11', '2027-01-25']);
@@ -476,7 +605,99 @@ describe('cross-agency reconciliation', () => {
   it('does not pair a vacancy with a different block a week later', () => {
     const s = store();
     ingest(s, base({ reference: '' }), now);
-    ingest(s, base({ sourceId: '1medical', externalId: 'Z', reference: '', startDate: '2027-01-18', endDate: '2027-01-31' }), now);
+    ingest(
+      s,
+      base({
+        sourceId: '1medical',
+        externalId: 'Z',
+        reference: '',
+        startDate: '2027-01-18',
+        endDate: '2027-01-31',
+      }),
+      now,
+    );
     expect(s.reviews).toHaveLength(0);
+  });
+});
+
+describe('forward planning', () => {
+  it('finds the best set of non-overlapping placements', async () => {
+    const { bestRun } = await import('@/domain/planning');
+    const s = store();
+    // A: Jan 11–24 (score high), B: Jan 20–Feb 2 overlaps A, C: Feb 8–21.
+    const a = ingest(
+      s,
+      base({
+        externalId: 'A',
+        reference: 'A',
+        compensation: { ...base().compensation, amount: 220 },
+      }),
+      now,
+    );
+    const b = ingest(
+      s,
+      base({
+        externalId: 'B',
+        reference: 'B',
+        startDate: '2027-01-20',
+        endDate: '2027-02-02',
+        compensation: { ...base().compensation, amount: 200 },
+      }),
+      now,
+    );
+    const c = ingest(
+      s,
+      base({ externalId: 'C', reference: 'C', startDate: '2027-02-08', endDate: '2027-02-21' }),
+      now,
+    );
+    const plan = bestRun(evaluate(s, now), s.profile, { by: 'score' });
+    const ids = plan.steps.map((x) => x.job.opportunity.id);
+    expect(ids).toEqual([a.opportunityId, c.opportunityId]);
+    expect(ids).not.toContain(b.opportunityId);
+    const money = bestRun(evaluate(s, now), s.profile, { by: 'earnings' });
+    expect(money.gross).toBe(220 * 80 + 170 * 80);
+  });
+  it('always keeps committed placements and plans around them', async () => {
+    const { bestRun } = await import('@/domain/planning');
+    const s = store();
+    const a = ingest(
+      s,
+      base({
+        externalId: 'A',
+        reference: 'A',
+        compensation: { ...base().compensation, amount: 250 },
+      }),
+      now,
+    );
+    const b = ingest(
+      s,
+      base({ externalId: 'B', reference: 'B', startDate: '2027-01-20', endDate: '2027-02-02' }),
+      now,
+    );
+    s.actions.push({
+      opportunityId: b.opportunityId,
+      stage: 'Accepted',
+      notes: '',
+      updatedAt: now.toISOString(),
+    });
+    const ids = bestRun(evaluate(s, now), s.profile, { by: 'score' }).steps.map(
+      (x) => x.job.opportunity.id,
+    );
+    expect(ids).toContain(b.opportunityId);
+    expect(ids).not.toContain(a.opportunityId);
+  });
+  it('labels recurring patterns as predictions, separate from advertised jobs', async () => {
+    const { predictedVacancies } = await import('@/domain/planning');
+    const s = store();
+    for (const [i, m] of ['2026-03', '2026-05', '2026-08'].entries())
+      ingest(
+        s,
+        base({ externalId: `H${i}`, reference: `H${i}`, startDate: `${m}-01`, endDate: `${m}-14` }),
+        now,
+      );
+    const p = predictedVacancies(s, now);
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ specialty: 'Psychiatry', month: '2026-11' });
+    expect(p[0].basis).toMatch(/3 different months/);
   });
 });

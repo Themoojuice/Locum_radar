@@ -22,7 +22,13 @@ const listing = (i: number, sourceId: string, amount = 160): ListingInput => ({
   roster: 'Days',
   reference: `REF-${i}`,
   requirements: { ...unknownRequirements },
-  compensation: { ...emptyCompensation, amount, basis: 'hour', super: 'additional', onCall: 'none' },
+  compensation: {
+    ...emptyCompensation,
+    amount,
+    basis: 'hour',
+    super: 'additional',
+    onCall: 'none',
+  },
   flights: 'unknown',
   accommodation: 'unknown',
   status: 'advertised',
@@ -86,7 +92,10 @@ describe('nature lens', async () => {
   const { alaUrl, parseAla, rescore } = await import('@/server/biodiversity');
   it('builds an Atlas of Living Australia query and counts species', () => {
     const url = new URL(
-      alaUrl({ lat: -16.92, lon: 145.77 }, { enabled: true, query: 'family:Salticidae', label: 'jumping spider', radiusKm: 25 }),
+      alaUrl(
+        { lat: -16.92, lon: 145.77 },
+        { enabled: true, query: 'family:Salticidae', label: 'jumping spider', radiusKm: 25 },
+      ),
     );
     expect(url.hostname).toBe('biocache-ws.ala.org.au');
     expect(url.searchParams.get('q')).toBe('family:Salticidae');
@@ -110,9 +119,20 @@ describe('nature lens', async () => {
   });
   it('scores richness on a log scale relative to the richest hospital', () => {
     const f = (species: number) =>
-      ({ biodiversity: { taxon: 'jumping spider', species, records: 0, radiusKm: 25, score: null, fetchedAt: '' } }) as never;
+      ({
+        biodiversity: {
+          taxon: 'jumping spider',
+          species,
+          records: 0,
+          radiusKm: 25,
+          score: null,
+          fetchedAt: '',
+        },
+      }) as never;
     const list = [f(80), f(8), f(0)];
     rescore(list, 'jumping spider');
-    expect(list.map((x: { biodiversity: { score: number } }) => x.biodiversity.score)).toEqual([100, 50, 0]);
+    expect(list.map((x: { biodiversity: { score: number } }) => x.biodiversity.score)).toEqual([
+      100, 50, 0,
+    ]);
   });
 });

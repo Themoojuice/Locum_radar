@@ -24,7 +24,9 @@ const t = async (label: string, fn: () => unknown) => {
 await t(`ingest ${n} listings (one transaction)`, () =>
   transaction((s) => {
     for (let i = 0; i < n; i++) {
-      const start = new Date(Date.UTC(2027, 0, 1) + (i % 300) * 86400000).toISOString().slice(0, 10);
+      const start = new Date(Date.UTC(2027, 0, 1) + (i % 300) * 86400000)
+        .toISOString()
+        .slice(0, 10);
       const end = new Date(Date.UTC(2027, 0, 8) + (i % 300) * 86400000).toISOString().slice(0, 10);
       ingest(s, {
         ...base,
@@ -44,11 +46,17 @@ await t('no-op write transaction', () => transaction(() => {}));
 await t('one-field write transaction', () => transaction((s) => void (s.profile.name = 'x')));
 const store = (await t('readStore', () => readStore())) as Awaited<ReturnType<typeof readStore>>;
 await t('evaluate', () => evaluate(store));
-console.log(`client payload (full store JSON)       ${(JSON.stringify(store).length / 1e6).toFixed(1)} MB`);
+console.log(
+  `client payload (full store JSON)       ${(JSON.stringify(store).length / 1e6).toFixed(1)} MB`,
+);
 const { clientView } = await import('../src/server/views');
-console.log(`client payload (feed view)             ${(JSON.stringify(clientView(store)).length / 1e6).toFixed(1)} MB`);
+console.log(
+  `client payload (feed view)             ${(JSON.stringify(clientView(store)).length / 1e6).toFixed(1)} MB`,
+);
 const view = clientView(store) as unknown as Record<string, unknown[]>;
 for (const k of ['listings', 'offers', 'opportunities', 'facilities', 'events', 'reviews'])
   console.log(`  ${k.padEnd(14)} ${(JSON.stringify(view[k]).length / 1e6).toFixed(1)} MB`);
 const { gzipSync } = await import('node:zlib');
-console.log(`client payload (feed view, gzip)       ${(gzipSync(JSON.stringify(clientView(store))).length / 1e6).toFixed(1)} MB`);
+console.log(
+  `client payload (feed view, gzip)       ${(gzipSync(JSON.stringify(clientView(store))).length / 1e6).toFixed(1)} MB`,
+);

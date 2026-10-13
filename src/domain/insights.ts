@@ -4,12 +4,7 @@ import { dimensions, type Profile, type Store, type Weights } from './model';
 /* ---------------------------------------------------------------------- alerts */
 
 export type AlertKind =
-  | 'new-high'
-  | 'rate'
-  | 'better-offer'
-  | 'urgent'
-  | 'future-match'
-  | 'saved-change';
+  'new-high' | 'rate' | 'better-offer' | 'urgent' | 'future-match' | 'saved-change';
 export interface Alert {
   id: string;
   at: string;
@@ -70,7 +65,12 @@ export function deriveAlerts(store: Store, jobs: EvaluatedJob[], now = new Date(
       continue;
     }
     if (e.kind === 'new' && good(job))
-      add(job, 'new-high', e.at, `Scores ${job.ranking.score}. ${job.ranking.summary[0] ?? ''}`.trim());
+      add(
+        job,
+        'new-high',
+        e.at,
+        `Scores ${job.ranking.score}. ${job.ranking.summary[0] ?? ''}`.trim(),
+      );
     if (
       e.kind === 'rate-change' &&
       e.before &&
@@ -149,7 +149,8 @@ export function suggestWeights(profile: Profile, jobs: EvaluatedJob[]): WeightSu
     const gap = a - b; // −100..100
     if (Math.abs(gap) < 10) continue;
     raw[d] = Math.max(0, profile.weights[d] * (1 + gap / 100));
-    notes[d] = `Jobs you kept average ${Math.round(a)} here; jobs you dismissed average ${Math.round(b)}.`;
+    notes[d] =
+      `Jobs you kept average ${Math.round(a)} here; jobs you dismissed average ${Math.round(b)}.`;
   }
   const total = dimensions.reduce((s, d) => s + raw[d], 0) || 1;
   const currentTotal = dimensions.reduce((s, d) => s + profile.weights[d], 0) || 1;
@@ -179,9 +180,12 @@ export function outstandingQuestions(job: EvaluatedJob): string[] {
   const q: string[] = [];
   const o = job.opportunity,
     offers = job.activeOffers;
-  if (!offers.some((v) => v.compensation.amount !== null)) q.push('What is the rate, and on what basis (hourly, daily, per shift)?');
-  if (offers.some((v) => v.compensation.super === 'unknown')) q.push('Is the rate inclusive of superannuation, or is super paid on top?');
-  if (offers.some((v) => v.compensation.onCall === 'unknown')) q.push('Is there on-call, and how is it paid?');
+  if (!offers.some((v) => v.compensation.amount !== null))
+    q.push('What is the rate, and on what basis (hourly, daily, per shift)?');
+  if (offers.some((v) => v.compensation.super === 'unknown'))
+    q.push('Is the rate inclusive of superannuation, or is super paid on top?');
+  if (offers.some((v) => v.compensation.onCall === 'unknown'))
+    q.push('Is there on-call, and how is it paid?');
   if (offers.some((v) => v.compensation.paidHours === null && v.compensation.basis === 'hour'))
     q.push('How many paid hours are guaranteed across the placement?');
   if (!o.roster) q.push('What is the roster (shift times, weekends, nights)?');
@@ -189,10 +193,14 @@ export function outstandingQuestions(job: EvaluatedJob): string[] {
     q.push('Are flights or travel to the site covered?');
   if (!offers.some((v) => v.accommodation === 'included') && !job.logistics.local)
     q.push('Is accommodation provided?');
-  for (const c of job.eligibility.checks.filter((c) => c.status === 'unknown' && !/your|you /i.test(c.text)))
+  for (const c of job.eligibility.checks.filter(
+    (c) => c.status === 'unknown' && !/your|you /i.test(c.text),
+  ))
     q.push(c.text.replace(/\.$/, '') + ' — can you confirm?');
-  if (o.requirements.supervisionAvailable === null) q.push('What senior support or supervision is available on site?');
-  if (!o.requirements.complete) q.push('Could you send the full list of credentialing requirements?');
+  if (o.requirements.supervisionAvailable === null)
+    q.push('What senior support or supervision is available on site?');
+  if (!o.requirements.complete)
+    q.push('Could you send the full list of credentialing requirements?');
   if (o.status !== 'confirmed available') q.push('Is the placement still available?');
   return [...new Set(q)];
 }

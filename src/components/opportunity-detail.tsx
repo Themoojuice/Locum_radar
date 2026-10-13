@@ -1,9 +1,53 @@
 'use client';
-import { useState } from 'react';
-import { ExternalLink, Plane, House, ArrowUpRight, Split, Trash2 } from 'lucide-react';
-import { stages, type Compensation, type Offer, type Stage, type Store } from '@/domain/model';
-import { normalisePay, type EvaluatedJob } from '@/domain/engine';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowUpRight,
+  CalendarCheck,
+  ClipboardCopy,
+  ExternalLink,
+  Mail,
+  Plane,
+  Route,
+  ShieldCheck,
+  Sparkles,
+  Split,
+  Trash2,
+} from 'lucide-react';
+import {
+  stages,
+  type Compensation,
+  type Observation,
+  type Offer,
+  type RadarEvent,
+  type SourceListing,
+  type Stage,
+  type Store,
+} from '@/domain/model';
+import { earnings, normalisePay, type EvaluatedJob, type Figure } from '@/domain/engine';
+import { facilityIntelligence } from '@/domain/coverage';
+import { enquiryDraft } from '@/domain/insights';
 import { api, Badge, dateLabel, Modal, money, rateLabel } from './shared';
+import { eligTone, Indicators, ScoreRing } from './opportunity-card';
+
+const kindLabel: Record<Figure['kind'], string> = {
+  advertised: 'stated',
+  calculated: 'calculated',
+  estimated: 'estimate',
+  unknown: 'unknown',
+};
+function FigureRow({ label, f }: { label: string; f: Figure }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>
+        {f.value === null ? <span className="muted">Unknown</span> : money(f.value)}{' '}
+        <span className={`figure-kind ${f.kind}`} title={f.note}>
+          {kindLabel[f.kind]}
+        </span>
+      </dd>
+    </div>
+  );
+}
 function PayScenario({ offer }: { offer: Offer }) {
   const [c, setC] = useState<Compensation>({ ...offer.compensation });
   const pay = normalisePay(c);
@@ -60,13 +104,10 @@ function PayScenario({ offer }: { offer: Offer }) {
           <dd>{money(pay.committedHourly)}</dd>
         </div>
       </dl>
-      <p className="small muted">
-        Before personal income tax. On-call and super-inclusive amounts do not produce a cash hourly
-        comparison.
-      </p>
     </details>
   );
 }
+
 export function OpportunityDetail({
   job,
   store,
@@ -87,10 +128,33 @@ export function OpportunityDetail({
     [notes, setNotes] = useState(job.action?.notes || ''),
     [busy, setBusy] = useState(false),
     [deleting, setDeleting] = useState(false);
-  async function save() {
+  // Full evidence is fetched per opportunity; the feed carries metadata only.
+  const [evidence, setEvidence] = useState<{
+    listings: SourceListing[];
+    observations: Observation[];
+    events: RadarEvent[];
+  } | null>(o.demo ? { listings: job.listings, observations: [], events: [] } : null);
+  useEffect(() => {
+    if (o.demo) return;
+    let live = true;
+    fetch(`/api/radar/detail?opportunity=${encodeURIComponent(o.id)}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v) => live && v && setEvidence(v))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [o.id, o.demo]);
+  const intel = useMemo(() => facilityIntelligence(store, f), [store, f]);
+  const enquiry = useMemo(() => enquiryDraft(job, store.profile), [job, store.profile]);
+  const email = offers.map((v) => v.contact.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0]).find(Boolean);
+  const sourceName = (id: string) => store.sources.find((s) => s.id === id)?.name ?? id;
+
+  async function save(next = stage) {
     setBusy(true);
     try {
-      await onAction(o.id, stage, notes);
+      await onAction(o.id, next, notes);
+      setStage(next);
       notify('Tracker updated');
     } catch (e) {
       notify((e as Error).message);
@@ -98,98 +162,179 @@ export function OpportunityDetail({
       setBusy(false);
     }
   }
+  const checkGroups = job.eligibility.checks.reduce<Record<string, typeof job.eligibility.checks>>(
+    (acc, c) => ({ ...acc, [c.dimension]: [...(acc[c.dimension] ?? []), c] }),
+    {},
+  );
   return (
     <Modal title={f.name} onClose={onClose} wide>
       <div className="detail-heading">
         <div>
           <p className="eyebrow">
-            {f.town}, {f.state} · {o.demo ? 'ILLUSTRATIVE EXAMPLE' : 'YOUR WORKSPACE'}
+            {f.town}, {f.state}
+            {job.logistics.distanceKm !== null
+              ? ` · ${job.logistics.distanceKm.toLocaleString('en-AU')} KM FROM HOME`
+              : ''}{' '}
+            · {o.demo ? 'ILLUSTRATIVE EXAMPLE' : 'YOUR WORKSPACE'}
           </p>
           <h2>{o.title}</h2>
           <p>
-            {dateLabel(o.startDate)} – {dateLabel(o.endDate, true)} · {f.timezone}
+            {dateLabel(o.startDate)} – {dateLabel(o.endDate, true)}
+            {o.shifts?.length ? ` · ${o.shifts.length} listed shifts` : ''}
+            {o.flexibility === 'flexible' ? ' · flexible dates' : ''} · {job.urgency.toLowerCase()}
           </p>
         </div>
-        <div className="detail-score">
-          <strong>{job.ranking.score ?? '—'}</strong>
-          <span>preference score</span>
-        </div>
+        <ScoreRing job={job} large />
       </div>
-      <div className="button-row">
-        <Badge tone={job.rankable ? 'green' : 'amber'}>{job.eligibility.status}</Badge>
-        <Badge>{job.freshness}</Badge>
-        <Badge>{o.status}</Badge>
-      </div>
-      <section className="detail-section">
-        <h3>Suitability & questions to resolve</h3>
-        <ul className="reason-list">
-          {job.eligibility.reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-        <p className="small muted">
-          A profile match is not professional credentialing or confirmation that the placement is
-          still available.
-        </p>
+      <Indicators job={job} />
+
+      <section className="four-questions">
+        <article>
+          <h3>
+            <ShieldCheck size={16} /> Are you eligible?
+            <Badge tone={eligTone(job.eligibility.status)}>{job.eligibility.status}</Badge>
+          </h3>
+          {Object.keys(checkGroups).length ? (
+            <ul className="check-list">
+              {Object.entries(checkGroups).map(([dimension, list]) =>
+                list.map((c) => (
+                  <li key={dimension + c.text} className={c.status}>
+                    <span>{dimension}</span>
+                    {c.text}
+                  </li>
+                )),
+              )}
+            </ul>
+          ) : (
+            <p className="small">{job.eligibility.reasons.join(' ')}</p>
+          )}
+          {job.eligibility.status === 'Likely eligible' && (
+            <p className="small muted">{job.eligibility.reasons[0]}</p>
+          )}
+        </article>
+        <article>
+          <h3>
+            <CalendarCheck size={16} /> Can you do the dates?
+            <Badge
+              tone={
+                job.scheduling.status === 'Fits'
+                  ? 'green'
+                  : job.scheduling.status === 'Conflict'
+                    ? 'red'
+                    : 'amber'
+              }
+            >
+              {job.scheduling.status}
+            </Badge>
+          </h3>
+          <ul className="reason-list small">
+            {[...job.scheduling.conflicts, ...job.scheduling.reasons].map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        </article>
+        <article>
+          <h3>
+            <Route size={16} /> Can it be arranged?
+            <Badge
+              tone={
+                job.logistics.status === 'Straightforward'
+                  ? 'green'
+                  : job.logistics.status === 'Excluded'
+                    ? 'red'
+                    : 'amber'
+              }
+            >
+              {job.logistics.status}
+            </Badge>
+          </h3>
+          <ul className="reason-list small">
+            {job.logistics.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        </article>
+        <article>
+          <h3>
+            <Sparkles size={16} /> Is it worth it?
+            <Badge tone={job.ranking.assessable ? 'green' : 'amber'}>
+              {job.ranking.assessable ? `${job.ranking.score} / 100` : 'Hard to assess'}
+            </Badge>
+          </h3>
+          <ul className="reason-list small">
+            {job.ranking.summary.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+          {job.ranking.missing.length > 0 && (
+            <p className="small muted">
+              No evidence yet for: {job.ranking.missing.join(', ').toLowerCase()}. Those weights are
+              left out, not scored as zero.
+            </p>
+          )}
+        </article>
       </section>
+
       <section className="detail-section">
         <div className="spread">
           <h3>
             {offers.length} recruiter offer{offers.length === 1 ? '' : 's'}
           </h3>
-          <span className="small muted">All amounts AUD</span>
+          <span className="small muted">AUD, before personal income tax</span>
         </div>
         <div className="offer-grid">
           {offers.map((offer) => {
-            const pay = normalisePay(offer.compensation),
-              listing = store.listings.find((l) => l.id === offer.listingId)!;
+            const e = earnings(offer, o, store.profile, job.logistics.local);
+            const listing =
+              evidence?.listings.find((l) => l.id === offer.listingId) ??
+              job.listings.find((l) => l.id === offer.listingId);
+            const inactive = ['withdrawn', 'filled'].includes(listing?.status ?? '');
             return (
-              <article className="offer" key={offer.id}>
+              <article className={`offer ${inactive ? 'inactive' : ''}`} key={offer.id}>
                 <div className="spread">
-                  <strong>{store.sources.find((s) => s.id === offer.sourceId)?.name}</strong>
+                  <strong>{sourceName(offer.sourceId)}</strong>
                   <span className="offer-price">{rateLabel(offer.compensation)}</span>
                 </div>
                 <dl className="facts">
                   <div>
-                    <dt>Advertised gross total</dt>
-                    <dd>{money(pay.gross)}</dd>
-                  </div>
-                  <div>
                     <dt>Comparable hourly</dt>
-                    <dd>{money(pay.hourly)}</dd>
+                    <dd>{money(e.hourly)}</dd>
                   </div>
+                  <FigureRow label="Gross for the placement" f={e.gross} />
+                  <FigureRow label="Travel" f={e.flights} />
+                  <FigureRow label="Accommodation" f={e.accommodation} />
+                  <FigureRow label="Expected after costs" f={e.net} />
+                  {e.opportunityCost.value !== null && (
+                    <FigureRow label="Value of travel time" f={e.opportunityCost} />
+                  )}
                   <div>
-                    <dt>After direct expenses</dt>
-                    <dd>{money(pay.afterExpenses)}</dd>
-                  </div>
-                  <div>
-                    <dt>Superannuation</dt>
-                    <dd>{offer.compensation.super}</dd>
-                  </div>
-                  <div>
-                    <dt>Payment arrangement</dt>
-                    <dd>{offer.compensation.arrangement}</dd>
-                  </div>
-                  <div>
-                    <dt>On-call</dt>
-                    <dd>{offer.compensation.onCall}</dd>
+                    <dt>Super · on-call · arrangement</dt>
+                    <dd>
+                      {offer.compensation.super} · {offer.compensation.onCall} ·{' '}
+                      {offer.compensation.arrangement}
+                    </dd>
                   </div>
                 </dl>
+                <p className="small">
+                  <Badge
+                    tone={e.confidence === 'High' ? 'green' : e.confidence === 'Low' ? 'amber' : ''}
+                  >
+                    {e.confidence} confidence
+                  </Badge>
+                </p>
+                {(e.assumptions.length > 0 || e.warnings.length > 0) && (
+                  <ul className="small muted">
+                    {[...e.assumptions, ...e.warnings].map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
                 <div className="perks">
                   <span>
-                    <Plane size={14} />
-                    Flights: {offer.flights}
+                    <Plane size={14} /> Flights: {offer.flights}
                   </span>
-                  <span>
-                    <House size={14} />
-                    Stay: {offer.accommodation}
-                  </span>
+                  <span>Stay: {offer.accommodation}</span>
                 </div>
-                <ul className="small muted">
-                  {pay.warnings.map((w) => (
-                    <li key={w}>{w}</li>
-                  ))}
-                </ul>
                 <p className="small">{offer.contact || 'Recruiter contact not recorded'}</p>
                 {listing?.url && (
                   <a
@@ -202,42 +347,47 @@ export function OpportunityDetail({
                   </a>
                 )}
                 <PayScenario offer={offer} />
-                <p className="small">
-                  <Badge tone={['withdrawn', 'filled'].includes(listing?.status) ? 'amber' : ''}>
-                    {listing?.status}
-                  </Badge>
-                  {['withdrawn', 'filled'].includes(listing?.status) &&
-                    ' · Excluded from ranking and financial filters'}
-                </p>
+                {inactive && (
+                  <p className="small">
+                    <Badge tone="amber">{listing?.status}</Badge> Excluded from ranking and
+                    financial filters.
+                  </p>
+                )}
                 <details className="details-block">
                   <summary>Source evidence & observation history</summary>
-                  <p className="small">
-                    Source reference: {listing?.externalId}
-                    <br />
-                    First seen: {listing?.firstSeenAt}
-                    <br />
-                    Last observed: {listing?.observedAt}
-                  </p>
-                  <pre className="evidence">{listing?.rawText}</pre>
-                  <dl className="evidence-fields">
-                    {Object.entries(listing?.evidence || {}).map(([field, text]) => (
-                      <div key={field}>
-                        <dt>{field}</dt>
-                        <dd>{text}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  {store.observations
-                    .filter((v) => v.listingId === listing?.id)
-                    .map((v) => (
-                      <details key={v.id}>
-                        <summary className="small">
-                          Observed {new Date(v.observedAt).toLocaleString('en-AU')} ·{' '}
-                          {rateLabel(v.snapshot.compensation)}
-                        </summary>
-                        <pre className="evidence">{JSON.stringify(v.snapshot, null, 2)}</pre>
-                      </details>
-                    ))}
+                  {!evidence ? (
+                    <p className="small muted">Loading source evidence…</p>
+                  ) : (
+                    <>
+                      <p className="small">
+                        Source reference: {listing?.externalId}
+                        <br />
+                        First seen: {listing?.firstSeenAt}
+                        <br />
+                        Last observed: {listing?.observedAt}
+                      </p>
+                      <pre className="evidence">{listing?.rawText}</pre>
+                      <dl className="evidence-fields">
+                        {Object.entries(listing?.evidence || {}).map(([field, text]) => (
+                          <div key={field}>
+                            <dt>{field}</dt>
+                            <dd>{text}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {evidence.observations
+                        .filter((v) => v.listingId === listing?.id)
+                        .map((v) => (
+                          <details key={v.id}>
+                            <summary className="small">
+                              Observed {new Date(v.observedAt).toLocaleString('en-AU')} ·{' '}
+                              {rateLabel(v.snapshot.compensation)}
+                            </summary>
+                            <pre className="evidence">{JSON.stringify(v.snapshot, null, 2)}</pre>
+                          </details>
+                        ))}
+                    </>
+                  )}
                 </details>
                 {offers.length > 1 && !o.demo && (
                   <button
@@ -248,8 +398,8 @@ export function OpportunityDetail({
                         await onReload();
                         onClose();
                         notify('Listing separated; its source history was retained.');
-                      } catch (e) {
-                        notify((e as Error).message);
+                      } catch (err) {
+                        notify((err as Error).message);
                       }
                     }}
                   >
@@ -262,23 +412,106 @@ export function OpportunityDetail({
           })}
         </div>
       </section>
-      <section className="detail-section">
-        <h3>Why it appears here</h3>
-        <p className="muted">
-          {job.ranking.evidence}% of scoring dimensions have evidence. {job.ranking.weightCoverage}%
-          of your chosen weight is supported. Missing dimensions are omitted and the remaining
-          weights are normalised.
-        </p>
-        <ul className="reason-list">
-          {job.ranking.explanations.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-        <p className="small muted">
-          Location interest: {f.adventureNote}. Clinical score measures specialty preference, not
-          training accreditation.
-        </p>
+
+      <section className="detail-section two-col">
+        <div>
+          <h3>About this hospital</h3>
+          <dl className="intel">
+            <div>
+              <dt>Vacancies observed here</dt>
+              <dd>
+                {intel.total} across {intel.months} month{intel.months === 1 ? '' : 's'}
+                {intel.recurring ? ' · recurring need' : ''}
+              </dd>
+            </div>
+            <div>
+              <dt>Comparable hourly seen</dt>
+              <dd>
+                {intel.rate
+                  ? `${money(intel.rate.min)}–${money(intel.rate.max)}, median ${money(intel.rate.median)} (${intel.rate.n})`
+                  : 'None comparable yet'}
+              </dd>
+            </div>
+            <div>
+              <dt>Agencies</dt>
+              <dd>{intel.sources.map((s) => `${s.name} (${s.count})`).join(', ') || '—'}</dd>
+            </div>
+            {f.biodiversity && (
+              <div>
+                <dt>Nature lens</dt>
+                <dd>
+                  {f.biodiversity.species} {f.biodiversity.taxon} species,{' '}
+                  {f.biodiversity.records.toLocaleString('en-AU')} records within{' '}
+                  {f.biodiversity.radiusKm} km (Atlas of Living Australia)
+                </dd>
+              </div>
+            )}
+          </dl>
+          {evidence?.events.length ? (
+            <>
+              <h4>History</h4>
+              <ul className="event-list small">
+                {evidence.events
+                  .slice(-8)
+                  .reverse()
+                  .map((e) => (
+                    <li key={e.id}>
+                      <time>{new Date(e.at).toLocaleDateString('en-AU')}</time> {e.detail}{' '}
+                      <span className="muted">({sourceName(e.sourceId)})</span>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+        <div>
+          <h3>
+            <Mail size={16} /> Enquiry draft
+          </h3>
+          <p className="small muted">
+            Built from what the record does not yet establish. Nothing is sent from here.
+          </p>
+          <textarea
+            className="enquiry"
+            readOnly
+            rows={10}
+            value={`Subject: ${enquiry.subject}\n\n${enquiry.body}`}
+          />
+          <div className="button-row">
+            <button
+              className="button secondary small"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(`${enquiry.subject}\n\n${enquiry.body}`);
+                  notify('Enquiry copied');
+                } catch {
+                  notify('Copy failed; select the text instead.');
+                }
+              }}
+            >
+              <ClipboardCopy size={14} /> Copy
+            </button>
+            {email && (
+              <a
+                className="button secondary small"
+                href={`mailto:${email}?subject=${encodeURIComponent(enquiry.subject)}&body=${encodeURIComponent(enquiry.body)}`}
+              >
+                <Mail size={14} /> Open in mail
+              </a>
+            )}
+            {!o.demo && (stage === 'Discovered' || stage === 'Saved') && (
+              <button
+                className="text-button small"
+                disabled={busy}
+                onClick={() => save('Enquiry sent')}
+              >
+                I sent it — mark as enquiry sent
+              </button>
+            )}
+          </div>
+        </div>
       </section>
+
       <section className="detail-section">
         <h3>Your next step</h3>
         <div className="form-grid">
@@ -303,7 +536,7 @@ export function OpportunityDetail({
             placeholder="Questions, terms to confirm, or reasons this job stands out…"
           />
         </label>
-        <button className="button primary" disabled={busy} onClick={save}>
+        <button className="button primary" disabled={busy} onClick={() => save()}>
           {busy ? 'Saving…' : 'Save tracker & notes'}
           <ArrowUpRight size={16} />
         </button>

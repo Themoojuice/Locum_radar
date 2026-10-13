@@ -61,7 +61,11 @@ const weekday = (d: string) => {
   const w = new Date(`${d}T00:00:00Z`).getUTCDay();
   return w !== 0 && w !== 6;
 };
-const shortDate = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const shortDate = new Intl.DateTimeFormat('en-AU', {
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'UTC',
+});
 const fmt = (d: string) => shortDate.format(new Date(`${d}T00:00:00Z`));
 const rangeText = (dates: string[]) =>
   !dates.length
@@ -76,8 +80,7 @@ export function distanceKm(
   a: { lat: number | null; lon: number | null } | null,
   b: { lat: number | null; lon: number | null } | null,
 ) {
-  if (!a || !b || a.lat === null || a.lon === null || b.lat === null || b.lon === null)
-    return null;
+  if (!a || !b || a.lat === null || a.lon === null || b.lat === null || b.lon === null) return null;
   const r = Math.PI / 180,
     dLat = (b.lat - a.lat) * r,
     dLon = (b.lon - a.lon) * r;
@@ -126,23 +129,35 @@ export function assessEligibility(
   const r = o.requirements;
 
   // Registration. Specialist and general registration are not treated as interchangeable.
-  if (p.registration === 'unknown') add('Registration', 'unknown', 'Confirm your registration category.');
+  if (p.registration === 'unknown')
+    add('Registration', 'unknown', 'Confirm your registration category.');
   else if (p.registration === 'limited' && r.registration && r.registration !== 'limited')
-    add('Registration', 'conflict', 'The stated registration requirement conflicts with limited registration.');
-  else if (!r.registration) add('Registration', 'unknown', 'The required registration category is not stated.');
+    add(
+      'Registration',
+      'conflict',
+      'The stated registration requirement conflicts with limited registration.',
+    );
+  else if (!r.registration)
+    add('Registration', 'unknown', 'The required registration category is not stated.');
   else if (p.registration !== r.registration)
     add(
       'Registration',
       'unknown',
       `Confirm whether your ${p.registration} registration satisfies the stated ${r.registration} requirement.`,
     );
-  else add('Registration', 'met', `${r.registration[0].toUpperCase()}${r.registration.slice(1)} registration matches.`);
+  else
+    add(
+      'Registration',
+      'met',
+      `${r.registration[0].toUpperCase()}${r.registration.slice(1)} registration matches.`,
+    );
 
   // Postgraduate experience.
   if (p.pgy === null) add('Experience', 'unknown', 'Your postgraduate year is not confirmed.');
   else if (r.minPgy !== null && p.pgy < r.minPgy)
     add('Experience', 'conflict', `Requires PGY${r.minPgy}; your profile is PGY${p.pgy}.`);
-  else if (r.minPgy !== null) add('Experience', 'met', `PGY${p.pgy} meets the PGY${r.minPgy} minimum.`);
+  else if (r.minPgy !== null)
+    add('Experience', 'met', `PGY${p.pgy} meets the PGY${r.minPgy} minimum.`);
 
   // Qualifications, fellowships and credentialing items.
   for (const credential of r.credentials)
@@ -154,7 +169,8 @@ export function assessEligibility(
       );
     else add('Credentials', 'met', `${credential} held.`);
   if (r.fellowship === true) {
-    if (p.fellowships.length) add('Fellowship', 'met', `Fellowship required; you hold ${p.fellowships.join(', ')}.`);
+    if (p.fellowships.length)
+      add('Fellowship', 'met', `Fellowship required; you hold ${p.fellowships.join(', ')}.`);
     else
       add(
         'Fellowship',
@@ -163,7 +179,11 @@ export function assessEligibility(
       );
   }
   if (r.fellowship === null && o.grade === 'Consultant' && !p.fellowships.length)
-    add('Fellowship', 'unknown', 'Consultant roles usually require a fellowship; the source does not say.');
+    add(
+      'Fellowship',
+      'unknown',
+      'Consultant roles usually require a fellowship; the source does not say.',
+    );
 
   // Specialty competence and grade.
   if (!p.competentSpecialties.length)
@@ -198,13 +218,22 @@ export function assessEligibility(
 
   // Training and employment restrictions. Approval is never inferred.
   if (p.employmentApproval === 'unknown')
-    add('Restrictions', 'unknown', 'Confirm whether your employer or training program must approve locum work.');
+    add(
+      'Restrictions',
+      'unknown',
+      'Confirm whether your employer or training program must approve locum work.',
+    );
   else if (p.employmentApproval === 'needed')
-    add('Restrictions', 'unknown', 'Secondary-employment approval is needed and not yet recorded as granted.');
+    add(
+      'Restrictions',
+      'unknown',
+      'Secondary-employment approval is needed and not yet recorded as granted.',
+    );
 
   const conflicts = checks.filter((c) => c.status === 'conflict').map((c) => c.text);
   const unknown = checks.filter((c) => c.status === 'unknown').map((c) => c.text);
-  if (conflicts.length) return { status: 'Ineligible', reasons: [...conflicts, ...unknown], checks };
+  if (conflicts.length)
+    return { status: 'Ineligible', reasons: [...conflicts, ...unknown], checks };
   if (unknown.length) return { status: 'Needs verification', reasons: unknown, checks };
   if (!r.complete)
     return {
@@ -245,11 +274,18 @@ export function assessScheduling(
       if (!hit.length) continue;
       const text = `${hit.length} day${hit.length > 1 ? 's' : ''} (${rangeText(hit)}) fall in ${availabilityLabels[kind].toLowerCase()}${w.note ? `: ${w.note}` : ''}.`;
       if (kind === 'unavailable') conflicts.push(text);
-      else reasons.push(kind === 'negotiable' ? `${text} Negotiable — check before committing.` : `${text} Approval is not assumed.`);
+      else
+        reasons.push(
+          kind === 'negotiable'
+            ? `${text} Negotiable — check before committing.`
+            : `${text} Approval is not assumed.`,
+        );
     }
   for (const c of committed)
     if (c.id !== o.id && overlaps(o, c))
-      conflicts.push(`Clashes with your committed placement: ${c.title} (${fmt(c.startDate)}–${fmt(c.endDate)}).`);
+      conflicts.push(
+        `Clashes with your committed placement: ${c.title} (${fmt(c.startDate)}–${fmt(c.endDate)}).`,
+      );
   if (duration(o) > p.maxPlacementDays)
     reasons.push(`Runs ${duration(o)} days, longer than your ${p.maxPlacementDays}-day maximum.`);
   const declared = p.availability.length > 0;
@@ -258,7 +294,9 @@ export function assessScheduling(
       p.availability.some((w) => w.kind !== 'unavailable' && d >= w.start && d <= w.end);
     const uncovered = dates.filter((d) => !covered(d));
     if (uncovered.length && uncovered.length < dates.length)
-      reasons.push(`${uncovered.length} day(s) (${rangeText(uncovered)}) are outside your declared availability.`);
+      reasons.push(
+        `${uncovered.length} day(s) (${rangeText(uncovered)}) are outside your declared availability.`,
+      );
     else if (uncovered.length === dates.length && !conflicts.length)
       reasons.push('The whole placement is outside your declared availability.');
   }
@@ -266,15 +304,26 @@ export function assessScheduling(
     if (o.flexibility === 'flexible')
       return {
         status: 'Fits with conditions',
-        reasons: [...reasons, 'Dates are advertised as flexible, so the conflict may be negotiable.'],
+        reasons: [
+          ...reasons,
+          'Dates are advertised as flexible, so the conflict may be negotiable.',
+        ],
         conflicts,
       };
     return { status: 'Conflict', reasons, conflicts };
   }
   if (!declared && !reasons.length)
-    return { status: 'Not set', reasons: ['Add your availability to check these dates.'], conflicts };
+    return {
+      status: 'Not set',
+      reasons: ['Add your availability to check these dates.'],
+      conflicts,
+    };
   if (reasons.length) return { status: 'Fits with conditions', reasons, conflicts };
-  return { status: 'Fits', reasons: ['Every working day falls in your declared availability.'], conflicts };
+  return {
+    status: 'Fits',
+    reasons: ['Every working day falls in your declared availability.'],
+    conflicts,
+  };
 }
 
 /* ------------------------------------------------------------------ logistics */
@@ -290,7 +339,12 @@ export function assessLogistics(
   const local = km !== null && km <= LOCAL_KM;
   const reasons: string[] = [];
   if (p.excludedStates.includes(f.state))
-    return { status: 'Excluded', reasons: [`${f.state} is excluded in your profile.`], distanceKm: km, local };
+    return {
+      status: 'Excluded',
+      reasons: [`${f.state} is excluded in your profile.`],
+      distanceKm: km,
+      local,
+    };
   const lead = daysBetween(localDate(ctx.now, f.timezone), o.startDate);
   const tight =
     lead < p.credentialingLeadDays &&
@@ -312,10 +366,13 @@ export function assessLogistics(
       stayNo = offers.length > 0 && offers.every((v) => v.accommodation === 'not included');
     if (flights && stay) travel = 'arranged';
     else if (flightsNo || stayNo) travel = 'self';
-    if (flights && stay) reasons.push('Flights and accommodation are included by at least one offer.');
+    if (flights && stay)
+      reasons.push('Flights and accommodation are included by at least one offer.');
     else {
       if (!flights)
-        reasons.push(flightsNo ? 'Flights are not included.' : 'Flights are not confirmed as included.');
+        reasons.push(
+          flightsNo ? 'Flights are not included.' : 'Flights are not confirmed as included.',
+        );
       if (!stay)
         reasons.push(
           stayNo ? 'Accommodation is not included.' : 'Accommodation is not confirmed as included.',
@@ -452,14 +509,22 @@ export function earnings(
   const workdays = o.shifts?.length ? dates.length : dates.filter(weekday).length;
   if (pay.gross === null && c.amount !== null) {
     if (c.basis === 'day') {
-      gross = { value: c.amount * workdays, kind: 'estimated', note: `${workdays} working days assumed` };
+      gross = {
+        value: c.amount * workdays,
+        kind: 'estimated',
+        note: `${workdays} working days assumed`,
+      };
       assumptions.push(
         o.shifts?.length
           ? `Paid days taken as the ${workdays} listed shift dates.`
           : `Paid days taken as the ${workdays} weekdays in the block; confirm the roster.`,
       );
     } else if (c.basis === 'shift' && o.shifts?.length) {
-      gross = { value: c.amount * o.shifts.length, kind: 'estimated', note: `${o.shifts.length} listed shifts` };
+      gross = {
+        value: c.amount * o.shifts.length,
+        kind: 'estimated',
+        note: `${o.shifts.length} listed shifts`,
+      };
       assumptions.push(`Paid shifts taken as the ${o.shifts.length} listed shifts.`);
     } else if (c.basis === 'hour' && p.costs.assumedHoursPerDay) {
       const hours = workdays * p.costs.assumedHoursPerDay;
@@ -481,26 +546,39 @@ export function earnings(
     if (local) return { value: 0, kind: 'calculated', note: 'Local; not needed' };
     if (included === 'included') return { value: 0, kind: 'advertised', note: 'Included' };
     if (assumption === null)
-      return { value: null, kind: 'unknown', note: included === 'not included' ? 'Not included; no estimate set' : 'Unconfirmed' };
+      return {
+        value: null,
+        kind: 'unknown',
+        note: included === 'not included' ? 'Not included; no estimate set' : 'Unconfirmed',
+      };
     assumptions.push(
       `${label} ${included === 'not included' ? 'is not included' : 'is unconfirmed'}; estimated from your profile setting.`,
     );
     return { value: assumption * multiplier, kind: 'estimated', note: `${label} estimate` };
   };
   const flights = cost(offer.flights, p.costs.returnFlight, 'Return travel');
-  const accommodation = cost(offer.accommodation, p.costs.nightlyAccommodation, 'Accommodation', nights);
+  const accommodation = cost(
+    offer.accommodation,
+    p.costs.nightlyAccommodation,
+    'Accommodation',
+    nights,
+  );
   const listed: Figure =
     c.directExpenses === null
       ? { value: null, kind: 'unknown', note: 'Other expenses not stated' }
       : { value: c.directExpenses, kind: 'advertised', note: 'Stated expenses' };
   const travelCost =
-    flights.value !== null && accommodation.value !== null ? flights.value + accommodation.value : null;
+    flights.value !== null && accommodation.value !== null
+      ? flights.value + accommodation.value
+      : null;
   const net: Figure =
     gross.value !== null && travelCost !== null
       ? {
           value: gross.value - travelCost - (listed.value ?? 0),
           kind:
-            gross.kind === 'estimated' || flights.kind === 'estimated' || accommodation.kind === 'estimated'
+            gross.kind === 'estimated' ||
+            flights.kind === 'estimated' ||
+            accommodation.kind === 'estimated'
               ? 'estimated'
               : 'calculated',
           note: listed.value === null ? 'Before tax; other expenses unknown' : 'Before tax',
@@ -580,7 +658,12 @@ export function evidenceQuality(
   if (o.roster) score += 5;
   else gaps.push('Roster not stated.');
   score = Math.min(100, score);
-  return { score, label: score >= 70 ? 'High' : score >= 45 ? 'Moderate' : 'Low', gaps, sources: sources.size };
+  return {
+    score,
+    label: score >= 70 ? 'High' : score >= 45 ? 'Moderate' : 'Low',
+    gaps,
+    sources: sources.size,
+  };
 }
 
 /* -------------------------------------------------------------------- ranking */
@@ -645,7 +728,12 @@ export function rankOpportunity(
   let estimatedHourly = false;
   if (bestHourly === null && p.costs.assumedHoursPerDay) {
     const dayRates = offers
-      .filter((v) => v.compensation.basis === 'day' && v.compensation.amount !== null && v.compensation.onCall === 'none')
+      .filter(
+        (v) =>
+          v.compensation.basis === 'day' &&
+          v.compensation.amount !== null &&
+          v.compensation.onCall === 'none',
+      )
       .map((v) => v.compensation.amount! / p.costs.assumedHoursPerDay!);
     if (dayRates.length) {
       bestHourly = Math.max(...dayRates);
@@ -671,7 +759,9 @@ export function rankOpportunity(
   const locationNotes: string[] = [];
   if (f.adventure !== null) {
     parts.push(f.adventure);
-    locationNotes.push(f.adventureNote || 'your location rating');
+    locationNotes.push(
+      `location rated ${f.adventure}/100${/illustrative/i.test(f.adventureNote) ? ' (illustrative)' : ''}`,
+    );
   }
   if (f.biodiversity?.score != null) {
     parts.push(f.biodiversity.score);
@@ -679,7 +769,11 @@ export function rankOpportunity(
   }
   if (p.preferredStates.length) {
     parts.push(p.preferredStates.includes(f.state) ? 100 : 40);
-    locationNotes.push(p.preferredStates.includes(f.state) ? `${f.state} is a preferred state` : `${f.state} is not a preferred state`);
+    locationNotes.push(
+      p.preferredStates.includes(f.state)
+        ? `${f.state} is a preferred state`
+        : `${f.state} is not a preferred state`,
+    );
   }
   if (parts.length) {
     components.adventure = parts.reduce((a, b) => a + b, 0) / parts.length;
@@ -732,14 +826,21 @@ export function rankOpportunity(
 
   const statusScore =
     o.status === 'confirmed available' ? 100 : o.status === 'advertised' ? 65 : 40;
-  components.quality = clamp(statusScore + (o.flexibility === 'flexible' ? 15 : 0) + (offers.length > 1 ? 10 : 0));
-  reasons.quality = [
-    o.status === 'confirmed available' ? 'Confirmed available' : o.status === 'advertised' ? 'Advertised' : 'Awaiting verification',
-    o.flexibility === 'flexible' ? 'flexible dates' : '',
-    offers.length > 1 ? `${offers.length} competing offers` : '',
-  ]
-    .filter(Boolean)
-    .join(', ') + '.';
+  components.quality = clamp(
+    statusScore + (o.flexibility === 'flexible' ? 15 : 0) + (offers.length > 1 ? 10 : 0),
+  );
+  reasons.quality =
+    [
+      o.status === 'confirmed available'
+        ? 'Confirmed available'
+        : o.status === 'advertised'
+          ? 'Advertised'
+          : 'Awaiting verification',
+      o.flexibility === 'flexible' ? 'flexible dates' : '',
+      offers.length > 1 ? `${offers.length} competing offers` : '',
+    ]
+      .filter(Boolean)
+      .join(', ') + '.';
 
   const total = dimensions.reduce((s, d) => s + p.weights[d], 0);
   const observedWeight = dimensions.reduce(
@@ -775,7 +876,10 @@ export function rankOpportunity(
     reasons,
     explanations,
     /** Plain-language reasons, strongest contribution first. */
-    summary: ordered.slice(0, 3).map((d) => reasons[d]!).filter(Boolean),
+    summary: ordered
+      .slice(0, 3)
+      .map((d) => reasons[d]!)
+      .filter(Boolean),
     missing: missing.map((d) => dimensionLabels[d]),
     bestHourly,
     estimatedHourly,
@@ -836,7 +940,9 @@ export function evaluate(store: Store, now = new Date()) {
       const listings = listingsBy.get(opportunity.id) ?? [];
       const activeOffers = offers.filter(
         (o) =>
-          !['filled', 'withdrawn'].includes(listingsById.get(o.listingId)?.status ?? 'verification pending'),
+          !['filled', 'withdrawn'].includes(
+            listingsById.get(o.listingId)?.status ?? 'verification pending',
+          ),
       );
       const action = actions.get(opportunity.id);
       const sourceDown = offers.some((o) => !!sources.get(o.sourceId)?.error);
