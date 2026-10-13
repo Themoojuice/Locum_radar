@@ -1,6 +1,11 @@
 import type { Store } from './model';
 
-export function collectionPlan(store: Store, enabled: boolean, now = Date.now()) {
+export function collectionPlan(
+  store: Store,
+  enabled: boolean,
+  now = Date.now(),
+  missingConfig: Record<string, string> = {},
+) {
   const sources = store.sources
     .filter((s) => s.type === 'agency' || s.type === 'government')
     .map((source) => {
@@ -9,6 +14,7 @@ export function collectionPlan(store: Store, enabled: boolean, now = Date.now())
         : null;
       const reasons: string[] = [];
       if (source.method === 'manual') reasons.push('Collector not built yet');
+      if (missingConfig[source.id]) reasons.push(missingConfig[source.id]);
       if (source.permission !== 'approved' || !source.permissionEvidence.trim())
         reasons.push('Access review needed');
       if (!source.enabled) reasons.push('Source collection is off');

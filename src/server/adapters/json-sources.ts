@@ -12,18 +12,38 @@ export interface JsonBlock {
   notes: string[];
   url: string | null;
 }
-export interface JsonAdapter {
+interface AdapterBase {
   sourceId: string;
   /** Hosts this adapter may contact. Added to the collector allowlist. */
   hosts: string[];
   /** Documented API (terms govern access) or a site endpoint (robots also applies). */
   access: 'documented-api' | 'site-endpoint';
   robotsUrl: string | null;
+  /** Names the configuration a run needs, or null when it is ready. */
+  missingConfig?(env: Record<string, string | undefined>): string | null;
+}
+/** A newest-first paged source: one request per page, one parse per response. */
+export interface JsonAdapter extends AdapterBase {
+  format?: 'json' | 'html';
   maxPages: number;
   /** Returns null when required configuration (for example an API key) is missing. */
   pageUrl(page: number, env: Record<string, string | undefined>): string | null;
   parse(body: unknown): { blocks: JsonBlock[]; hasMore: boolean };
 }
+/** Services the collector gives an adapter that needs more than paging. */
+export interface CollectContext {
+  get(url: string, accept: string): Promise<{ status: number; text: string }>;
+  pause(): Promise<void>;
+  seen: Set<string>;
+  inScope(specialty: string | null, state: string | null): boolean;
+  log(text: string, level?: 'info' | 'warn' | 'error'): void;
+  stopped(): boolean;
+  env: Record<string, string | undefined>;
+}
+export interface CustomAdapter extends AdapterBase {
+  collect(ctx: CollectContext): Promise<JsonBlock[]>;
+}
+export type SourceAdapter = JsonAdapter | CustomAdapter;
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
 const strip = (html: string) =>
@@ -148,6 +168,8 @@ export const adzuna: JsonAdapter = {
   access: 'documented-api',
   robotsUrl: null,
   maxPages: 4,
+  missingConfig: (env) =>
+    env.ADZUNA_APP_ID && env.ADZUNA_APP_KEY ? null : 'Add ADZUNA_APP_ID and ADZUNA_APP_KEY',
   pageUrl(page, env) {
     if (!env.ADZUNA_APP_ID || !env.ADZUNA_APP_KEY) return null;
     const q = new URLSearchParams({
@@ -203,9 +225,4 @@ export const adzuna: JsonAdapter = {
     });
     return { blocks, hasMore: blocks.length === 50 };
   },
-};
-
-export const jsonAdapters: Record<string, JsonAdapter> = {
-  [wavelength.sourceId]: wavelength,
-  [adzuna.sourceId]: adzuna,
 };

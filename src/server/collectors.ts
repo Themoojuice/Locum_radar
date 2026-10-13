@@ -3,14 +3,16 @@ import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import { transaction, readStore } from './database';
 import { extractJobPostings, fromLabelledBlock, type Extraction } from './extraction';
-import { jsonAdapters, type JsonAdapter } from './adapters/json-sources';
-import { fingerprint } from '@/domain/ingestion';
-import type { CollectionRun, Store } from '@/domain/model';
+import type { JsonBlock, SourceAdapter } from './adapters/json-sources';
+import { sourceAdapters } from './adapters/registry';
+import { log, stopRequested } from './progress';
+import { fingerprint, ingest } from '@/domain/ingestion';
+import { listingInputSchema, type CollectionRun, type Profile, type Store } from '@/domain/model';
 
 const allowed = new Set([
   'medrecruit.medworld.com',
   'ochrerecruitment.com',
-  ...Object.values(jsonAdapters).flatMap((a) => a.hosts),
+  ...Object.values(sourceAdapters).flatMap((a) => a.hosts),
 ]);
 export function allowedSourceUrl(url: string) {
   const u = new URL(url);
@@ -139,53 +141,199 @@ export function queueExtractions(s: Store, sourceId: string, results: Extraction
   }
   return added;
 }
+/**
+ * Path-aware robots check for adapters with recorded permission: allowed when
+ * no rule for `*` or LocumRadar disallows a path the adapter will request.
+ * Returns the crawl delay in milliseconds, or null when a path is disallowed.
+ */
+export function robotsDelayFor(text: string, paths: string[]): number | null {
+  if (!/user-agent\s*:/i.test(text)) return null;
+  let relevant = false,
+    sawRule = false,
+    delay = 0;
+  const disallowed: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, '').trim();
+    if (!line) continue;
+    const [key, ...rest] = line.split(':'),
+      value = rest.join(':').trim(),
+      k = key.trim().toLowerCase();
+    if (k === 'user-agent') {
+      if (sawRule) relevant = false;
+      sawRule = false;
+      relevant ||= value === '*' || /locumradar/i.test(value);
+      continue;
+    }
+    sawRule = true;
+    if (!relevant) continue;
+    if (k === 'disallow' && value) disallowed.push(value);
+    if (k === 'crawl-delay' && Number(value) > 0) delay = Math.max(delay, Number(value) * 1000);
+  }
+  const matches = (rule: string, path: string) => {
+    const pattern = new RegExp(
+      '^' +
+        rule
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*/g, '.*')
+          .replace(/\\\$$/, '$'),
+    );
+    return pattern.test(path);
+  };
+  return paths.some((p) => disallowed.some((rule) => matches(rule, p))) ? null : delay;
+}
+
 const knownExternalIds = (s: Store, sourceId: string) =>
   new Set([
     ...s.listings.filter((l) => l.sourceId === sourceId).map((l) => l.externalId),
     ...s.reviews.filter((r) => r.sourceId === sourceId).map((r) => r.draft?.externalId ?? ''),
   ]);
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Profile scope: preferred specialties and excluded states, when the profile sets them. */
+export function inProfileScope(profile: Profile, specialty: string | null, state: string | null) {
+  if (state && (profile.excludedStates as string[]).includes(state)) return false;
+  if (specialty && profile.preferredSpecialties.length)
+    return (profile.preferredSpecialties as string[]).includes(specialty);
+  return true;
+}
 
 /**
- * Pages through a JSON adapter newest-first and stops once a page contains no
- * vacancy that has been seen before, so routine runs make a handful of requests.
+ * Saves a run's candidates. Records that pass validation are imported straight
+ * into the feed (reconciliation still sends possible duplicates to review);
+ * everything else waits in the review queue. Set COLLECTOR_AUTO_IMPORT=false to
+ * review every record first.
  */
-async function collectJson(adapter: JsonAdapter, sourceId: string) {
-  if (adapter.access === 'site-endpoint') {
-    const robots = await fetchPage(adapter.robotsUrl!);
-    if (robots.status !== 200 || !robotsAllows(robots.text))
-      throw new Error('Robots rules need review; collection stopped conservatively.');
-  }
-  const store = await readStore();
-  const seen = knownExternalIds(store, sourceId);
-  const results: Extraction[] = [];
-  for (let page = 1; page <= adapter.maxPages; page++) {
-    const url = adapter.pageUrl(page, process.env);
-    if (!url) throw new Error('This source needs configuration (for example an API key) first.');
-    if (page > 1) await pause(Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 2000));
-    const response = await fetchPage(url, 'application/json');
-    if (response.status !== 200)
-      throw new Error(
-        `Source returned HTTP ${response.status}; historical vacancies were retained.`,
-      );
-    let body: unknown;
-    try {
-      body = JSON.parse(response.text);
-    } catch {
-      throw new Error(
-        'Source did not return JSON. The endpoint may have changed; use manual import.',
-      );
+export function commitExtractions(
+  s: Store,
+  sourceId: string,
+  results: Extraction[],
+  autoImport = process.env.COLLECTOR_AUTO_IMPORT !== 'false',
+) {
+  const tally = { imported: 0, unchanged: 0, queued: 0 };
+  for (const result of results) {
+    const parsed = autoImport ? listingInputSchema.safeParse(result.draft) : null;
+    if (parsed?.success) {
+      try {
+        const outcome = ingest(s, parsed.data);
+        if (outcome.unchanged) tally.unchanged++;
+        else tally.imported++;
+        continue;
+      } catch (error) {
+        result.issues.push(`Automatic import failed: ${(error as Error).message}`);
+      }
     }
-    const { blocks, hasMore } = adapter.parse(body);
-    const extracted = blocks.map((b) => {
-      const r = fromLabelledBlock(b, sourceId, `${sourceId}-json`, store.facilities);
-      r.draft.url = b.url;
-      return r;
-    });
-    results.push(...extracted);
-    const unseen = extracted.filter((r) => !seen.has(r.draft.externalId ?? ''));
-    if (!hasMore || (blocks.length > 0 && unseen.length === 0)) break;
+    tally.queued += queueExtractions(s, sourceId, [result]);
   }
+  return tally;
+}
+export const describeTally = (t: { imported: number; unchanged: number; queued: number }) =>
+  `${t.imported} new or updated vacancies imported, ${t.unchanged} unchanged, ${t.queued} sent to Review queue.`;
+
+/**
+ * Runs one adapter. Paged adapters go newest first and stop at the first page
+ * whose vacancies have all been seen before, so routine runs are short.
+ */
+async function runAdapter(adapter: SourceAdapter, sourceId: string) {
+  const store = await readStore();
+  const missing = adapter.missingConfig?.(process.env);
+  if (missing) throw new Error(`Needs configuration: ${missing}.`);
+  let delay = Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 1500);
+  if (adapter.access === 'site-endpoint') {
+    const robots = await fetchPage(adapter.robotsUrl!, 'text/plain');
+    const paths =
+      'pageUrl' in adapter
+        ? [new URL(adapter.pageUrl(1, process.env)!).pathname]
+        : ['/wp-json/wp/v2/job_posts', '/doctors/jobs-board/'];
+    const robotsDelay = robots.status === 200 ? robotsDelayFor(robots.text, paths) : null;
+    if (robots.status !== 404 && robotsDelay === null)
+      throw new Error('Robots rules disallow the pages this collector needs; stopped.');
+    delay = Math.max(delay, robotsDelay ?? 0);
+  }
+  const seen = knownExternalIds(store, sourceId);
+  const say = (text: string, level: 'info' | 'warn' | 'error' = 'info') =>
+    log(sourceId, text, level);
+  const get = (url: string, accept: string) => fetchPage(url, accept);
+  let blocks: JsonBlock[] = [];
+  let outOfScope = 0;
+  const inScope = (specialty: string | null, state: string | null) =>
+    inProfileScope(store.profile, specialty, state);
+  if ('collect' in adapter) {
+    blocks = await adapter.collect({
+      get,
+      pause: () => pause(delay),
+      seen,
+      inScope,
+      log: say,
+      stopped: stopRequested,
+      env: process.env,
+    });
+  } else {
+    for (let page = 1; page <= adapter.maxPages; page++) {
+      if (stopRequested()) {
+        say(`Stopped on request after ${page - 1} page(s).`, 'warn');
+        break;
+      }
+      const url = adapter.pageUrl(page, process.env);
+      if (!url) throw new Error('This source needs configuration (for example an API key) first.');
+      if (page > 1) await pause(delay);
+      let response = await fetchPage(
+        url,
+        adapter.format === 'html' ? 'text/html' : 'application/json',
+      );
+      if (response.status >= 500) {
+        say(`Page ${page} returned HTTP ${response.status}; retrying once.`, 'warn');
+        await pause(delay * 2);
+        response = await fetchPage(
+          url,
+          adapter.format === 'html' ? 'text/html' : 'application/json',
+        );
+      }
+      if (response.status !== 200)
+        throw new Error(
+          `Page ${page} returned HTTP ${response.status}; historical vacancies were retained.`,
+        );
+      let body: unknown = response.text;
+      if (adapter.format !== 'html') {
+        try {
+          body = JSON.parse(response.text);
+        } catch {
+          throw new Error('Source did not return JSON. The endpoint may have changed.');
+        }
+      }
+      const parsed = adapter.parse(body);
+      blocks.push(...parsed.blocks);
+      const unseen = parsed.blocks.filter(
+        (b) => !seen.has(b.labelled.match(/^Listing ID: (.+)$/m)?.[1] ?? ''),
+      );
+      if (page === 1 || page % 10 === 0)
+        say(
+          `Page ${page}: ${parsed.blocks.length} locum listings, ${unseen.length} not seen before.`,
+        );
+      if (!parsed.hasMore) {
+        say(`Reached the last page (${page}).`);
+        break;
+      }
+      if (parsed.blocks.length > 0 && unseen.length === 0) {
+        say(`Page ${page} holds nothing new; stopping early.`);
+        break;
+      }
+      if (page === adapter.maxPages) say(`Stopped at the page limit (${page}).`, 'warn');
+    }
+  }
+  const results: Extraction[] = [];
+  for (const b of blocks) {
+    const r = fromLabelledBlock(b, sourceId, `${sourceId}-adapter`, store.facilities);
+    r.draft.url = b.url;
+    if (!inScope(r.draft.specialty ?? null, r.draft.state ?? null)) {
+      outOfScope++;
+      continue;
+    }
+    results.push(r);
+  }
+  if (outOfScope)
+    say(
+      `${outOfScope} listings fall outside your profile's specialties or states and were skipped.`,
+    );
   return results;
 }
 export async function collectSource(sourceId: string) {
@@ -207,9 +355,10 @@ export async function collectSource(sourceId: string) {
     !source.enabled ||
     source.permission !== 'approved' ||
     !source.permissionEvidence ||
-    !(source.method === 'jsonld' || (source.method === 'json-api' && jsonAdapters[source.id]))
+    !(source.method === 'jsonld' || (source.method === 'json-api' && sourceAdapters[source.id]))
   ) {
     record.message = 'Collection is disabled or access permission has not been recorded.';
+    log(sourceId, `${source.name}: ${record.message}`, 'warn');
     await transaction((s) => {
       s.runs.unshift(record);
       s.runs = s.runs.slice(0, 200);
@@ -227,18 +376,25 @@ export async function collectSource(sourceId: string) {
     current.lastAttempt = startedAt;
     return true;
   });
-  if (!acquired) return { ...record, message: 'Not due yet; the collection interval is enforced.' };
+  if (!acquired) {
+    log(sourceId, `${source.name}: not due yet; the collection interval is enforced.`, 'warn');
+    return { ...record, message: 'Not due yet; the collection interval is enforced.' };
+  }
   try {
     if (source.method === 'json-api') {
-      const results = await collectJson(jsonAdapters[source.id], sourceId);
-      await transaction((s) => {
-        record.count = queueExtractions(s, sourceId, results);
+      log(sourceId, `Starting ${source.name}.`);
+      const results = await runAdapter(sourceAdapters[source.id], sourceId);
+      const tally = await transaction((s) => {
+        const t = commitExtractions(s, sourceId, results);
         const current = s.sources.find((v) => v.id === sourceId)!;
         current.lastSuccess = startedAt;
         current.error = null;
+        return t;
       });
+      record.count = tally.imported + tally.queued;
       record.status = 'success';
-      record.message = `${record.count} new records await extraction review.`;
+      record.message = `${results.length} listings read. ${describeTally(tally)}`;
+      log(sourceId, record.message);
       record.completedAt = new Date().toISOString();
       await transaction((s) => {
         s.runs.unshift(record);
@@ -273,7 +429,11 @@ export async function collectSource(sourceId: string) {
     record.message = `${record.count} new records await extraction review.`;
   } catch (error) {
     record.status = 'failed';
-    record.message = error instanceof Error ? error.message : 'Collection failed';
+    const reason = error instanceof Error ? error.message : 'Collection failed';
+    record.message = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timed out/i.test(reason)
+      ? `Could not reach the site (${reason}). Check the internet connection; historical vacancies were retained.`
+      : reason;
+    log(sourceId, `Failed: ${record.message}`, 'error');
     await transaction((s) => {
       s.sources.find((v) => v.id === sourceId)!.error = record.message;
     });

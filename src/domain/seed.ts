@@ -95,7 +95,8 @@ const source = (
   permission: 'unreviewed',
   permissionEvidence: '',
   enabled: false,
-  intervalHours: 24,
+  // Automatic adapters stop early on routine runs, so they can refresh more often.
+  intervalHours: method === 'json-api' ? 6 : 24,
   lastSuccess: null,
   lastAttempt: null,
   error: null,
@@ -111,9 +112,16 @@ export function emptyStore(): Store {
       source(
         'medrecruit',
         'Medrecruit',
-        'https://medrecruit.medworld.com/jobs',
+        'https://medrecruit.medworld.com/jobs/listing/locum/australia',
         'agency',
-        'jsonld',
+        'json-api',
+      ),
+      source(
+        '1medical',
+        '1Medical',
+        'https://www.1medical.com.au/doctors/job-board/',
+        'agency',
+        'json-api',
       ),
       source(
         'ochre',

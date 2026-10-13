@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { authenticated } from '@/server/auth';
 import { readStore } from '@/server/database';
 import { collectionPlan } from '@/domain/collection';
+import { sourceAdapters } from '@/server/adapters/registry';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -9,7 +10,17 @@ export async function GET(request: Request) {
     if (!authenticated(request))
       return NextResponse.json({ error: 'Sign in to view collection progress' }, { status: 401 });
     return NextResponse.json(
-      collectionPlan(await readStore(), process.env.COLLECTOR_ENABLED === 'true'),
+      collectionPlan(
+        await readStore(),
+        process.env.COLLECTOR_ENABLED === 'true',
+        Date.now(),
+        Object.fromEntries(
+          Object.values(sourceAdapters).flatMap((a) => {
+            const missing = a.missingConfig?.(process.env);
+            return missing ? [[a.sourceId, missing]] : [];
+          }),
+        ),
+      ),
       {
         headers: { 'Cache-Control': 'private, no-store' },
       },

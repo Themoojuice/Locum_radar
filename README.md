@@ -24,6 +24,20 @@ Open **http://127.0.0.1:3000**. The server binds only to your computer's loopbac
 
 See [the import guide](docs/importing.md) for supported fields. Free-form extraction recognises a limited set of explicit patterns; arbitrary recruiter formats and attachments still require review or transcription.
 
+## Fetching vacancies automatically
+
+Add these to `.env.local`, then restart the app:
+
+```sh
+COLLECTOR_ENABLED=true
+APPROVED_SOURCES=medrecruit,1medical,wavelength   # sources you have permission to collect
+MAILDROP_DIR=/path/to/your/synced/mail-drop       # optional: folder filled by scripts/gmail-export.gs
+```
+
+On **Discover**, press **Fetch active vacancies**. The app loads the national hospital directory on first use, imports recent recruiter emails from the mail-drop folder, then runs every approved, enabled source that is due. A live log shows each step; if any source fails or is skipped, a warning lists it so you know the feed may be incomplete. Valid listings go straight to the feed (`COLLECTOR_AUTO_IMPORT=false` sends everything to Review queue instead); incomplete ones wait in Review queue. Collection is limited to your profile's preferred specialties and excludes your excluded states.
+
+The first run reads each source in full and takes several minutes (Medrecruit is about 190 pages; 1Medical reads up to 150 job pages per run). Later runs stop at the first page of listings already seen. Sources refresh at most every six hours. See [source acquisition](docs/source-acquisition.md) for what each source needs.
+
 ## What works
 
 - Separate facilities, underlying opportunities, source advertisements, recruiter offers and observation history.
@@ -75,7 +89,7 @@ Read [deployment and security](docs/deployment.md) before hosting. Runtime datab
 
 ## Verification
 
-Validated locally on 13 October 2026: 94 logic/security/database/source-adapter tests, TypeScript, lint, formatting and a production build. The five production-browser scenarios (desktop and mobile) were last run before the source-acquisition changes. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
+Validated locally on 13 October 2026: 105 logic/security/database/source-adapter tests, TypeScript, lint, formatting and a production build. The five production-browser scenarios (desktop and mobile) were last run before the source-acquisition changes. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
 
 ```sh
 npm run typecheck

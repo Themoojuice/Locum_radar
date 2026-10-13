@@ -6,6 +6,8 @@ import { listingInputSchema, profileSchema, stages } from '@/domain/model';
 import { ingest, mergeOpportunities, splitListing } from '@/domain/ingestion';
 import { previewImport } from '@/server/extraction';
 import { collectSource } from '@/server/collectors';
+import { prepareCollection } from '@/server/maintenance';
+import { requestStop } from '@/server/progress';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -35,6 +37,8 @@ const commandSchema = z.discriminatedUnion('command', [
     enabled: z.boolean(),
   }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
+  z.object({ command: z.literal('prepare') }),
+  z.object({ command: z.literal('stop') }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
   z.object({ command: z.literal('split'), listingId: z.string() }),
   z.object({ command: z.literal('resolve'), reviewId: z.string() }),
@@ -75,6 +79,11 @@ export async function POST(request: Request) {
         ),
       );
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
+    if (body.command === 'prepare') return NextResponse.json(await prepareCollection());
+    if (body.command === 'stop') {
+      requestStop();
+      return NextResponse.json({ ok: true });
+    }
     const result = await transaction((s) => {
       switch (body.command) {
         case 'profile':

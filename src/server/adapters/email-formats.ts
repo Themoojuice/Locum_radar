@@ -93,13 +93,13 @@ export function classifyRole(role: string): {
   } else if (/\b(gen(?:eral)? ?med(?:icine)?|med|medical|medicine)\b/i.test(role))
     specialty = 'General medicine';
   let grade: Grade | null = null;
-  if (/\bSRMO\b|senior RMO/i.test(role)) grade = 'SRMO';
-  else if (/\bPHO\b/.test(role)) grade = 'PHO';
-  else if (/\bCMO\b/.test(role)) grade = 'CMO';
+  if (/\bSRMO\b|senior RMO|senior resident/i.test(role)) grade = 'SRMO';
+  else if (/\bPHO\b|principal house officer/i.test(role)) grade = 'PHO';
+  else if (/\bCMO\b|career medical officer/i.test(role)) grade = 'CMO';
   else if (/\bReg(?:istrar)?\b/i.test(role)) grade = 'Registrar';
   else if (/\b(consultant|specialist|FACEM|VMO)\b/i.test(role)) grade = 'Consultant';
   else if (/\bGP\b|general practitioner/i.test(role)) grade = 'GP';
-  else if (/\bRMO\b/.test(role)) grade = 'RMO';
+  else if (/\bRMO\b|resident medical officer/i.test(role)) grade = 'RMO';
   else if (/\b(HMO|JMO)\b/.test(role)) {
     grade = 'RMO';
     notes.push('HMO/JMO recorded as RMO; confirm the expected PGY level.');
