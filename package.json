@@ -16,6 +16,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "collect": "node --env-file-if-exists=.env.local --import tsx scripts/collect.ts",
+    "import-mail": "node --env-file-if-exists=.env.local --import tsx scripts/import-mail.ts",
+    "import-facilities": "node --env-file-if-exists=.env.local --import tsx scripts/import-facilities.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm test && npm run build"

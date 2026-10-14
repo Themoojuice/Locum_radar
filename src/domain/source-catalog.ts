@@ -40,7 +40,7 @@ export const sourceRecipes: SourceRecipe[] = [
     ),
     qualification:
       observed +
-      ' First page has job links; button-driven pagination needs a rendered adapter. Coverage is reported as partial.',
+      ' A dedicated structured-page adapter supports numbered pagination. The generic HTML fallback cannot follow button controls. Full live coverage remains unqualified.',
   },
   {
     id: 'ochre',
@@ -91,7 +91,7 @@ export const sourceRecipes: SourceRecipe[] = [
     url: 'https://wave.com.au/doctor-jobs',
     config: web('https://wave.com.au/doctor-jobs', ['/job/*', '/doctor-jobs/*'], ['/doctor-jobs*']),
     qualification:
-      'Public page currently promotes recruiter matching. Zero discovered job links is a coverage failure; use labelled recruiter emails.',
+      'Dedicated job-endpoint adapter implemented and fixture-tested. The generic public-page fallback is incomplete; live endpoint coverage still requires qualification.',
   },
   {
     id: 'global-medics',

@@ -109,14 +109,57 @@ async function ready(c: Connection) {
     });
   await globals.radarReady;
 }
+/**
+ * APPROVED_SOURCES (comma-separated source ids in .env.local) records the
+ * owner's permission for sources still marked unreviewed, so a fresh
+ * workspace can collect without clicking through Access settings. A decision
+ * made in the interface (approved or denied) is never overridden.
+ */
+export function applyEnvironmentApprovals(
+  store: Store,
+  env: Record<string, string | undefined> = process.env,
+) {
+  const ids = (env.APPROVED_SOURCES ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+  for (const source of store.sources)
+    if (ids.includes(source.id) && source.permission === 'unreviewed' && source.method !== 'manual')
+      Object.assign(source, {
+        permission: 'approved',
+        permissionEvidence:
+          env.APPROVAL_NOTE?.trim() ||
+          'Owner recorded permission in APPROVED_SOURCES (.env.local).',
+        enabled: true,
+      });
+}
 async function load(c: Connection): Promise<Store> {
   const profile = await c.query("SELECT payload FROM user_profiles WHERE id = 'owner'");
-  if (!profile[0]?.payload) return emptyStore();
+  if (!profile[0]?.payload) {
+    const fresh = emptyStore();
+    applyEnvironmentApprovals(fresh);
+    return fresh;
+  }
   const store = { version: 1, profile: JSON.parse(profile[0].payload) } as Store;
   for (const [table, key] of tables)
     (store[key] as unknown[]) = (await c.query(`SELECT payload FROM ${table}`)).map((r) =>
       JSON.parse(r.payload),
     );
+  // Sources added to the registry after a workspace was created appear disabled and unreviewed.
+  // Registry-owned fields follow the code; permission and enablement stay the owner's.
+  for (const seed of emptyStore().sources) {
+    const existing = store.sources.find((s) => s.id === seed.id);
+    if (!existing) store.sources.push(seed);
+    else
+      Object.assign(existing, {
+        name: seed.name,
+        url: seed.url,
+        method:
+          existing.method === 'collector' && existing.collector ? existing.method : seed.method,
+        intervalHours: seed.intervalHours,
+      });
+  }
+  applyEnvironmentApprovals(store);
   return store;
 }
 async function save(c: Connection, s: Store) {

@@ -12,6 +12,19 @@ async function getPlan(): Promise<CollectionPlan> {
   return data;
 }
 const when = (value: string) => new Date(value).toLocaleString('en-AU');
+interface LogLine {
+  seq: number;
+  at: string;
+  sourceId: string;
+  level: 'info' | 'warn' | 'error';
+  text: string;
+}
+const clock = (value: string) =>
+  new Date(value).toLocaleTimeString('en-AU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 
 export function CollectionProgress({
   demo,
@@ -28,8 +41,41 @@ export function CollectionProgress({
   const [current, setCurrent] = useState('');
   const [results, setResults] = useState<{ name: string; status: string; message: string }[]>([]);
   const [total, setTotal] = useState(0);
+  const [lines, setLines] = useState<LogLine[]>([]);
+  const [incomplete, setIncomplete] = useState<string[]>([]);
   const stop = useRef(false),
-    running = useRef(false);
+    running = useRef(false),
+    seq = useRef(0),
+    logBox = useRef<HTMLOListElement>(null);
+  // Poll the server's progress log while a fetch is running.
+  useEffect(() => {
+    if (!busy) return;
+    let active = true;
+    const tick = async () => {
+      try {
+        const response = await fetch(`/api/collection/log?since=${seq.current}`, {
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data: { seq: number; lines: LogLine[] } = await response.json();
+        if (!active || !Array.isArray(data.lines)) return;
+        seq.current = Math.max(seq.current, data.seq ?? 0);
+        if (data.lines.length) setLines((previous) => [...previous, ...data.lines].slice(-300));
+      } catch {
+        /* The log is a convenience; results below remain authoritative. */
+      }
+    };
+    const timer = setInterval(tick, 1000);
+    void tick();
+    return () => {
+      active = false;
+      clearInterval(timer);
+      void tick();
+    };
+  }, [busy]);
+  useEffect(() => {
+    if (logBox.current) logBox.current.scrollTop = logBox.current.scrollHeight;
+  }, [lines]);
   useEffect(() => {
     let active = true;
     getPlan()
@@ -49,25 +95,50 @@ export function CollectionProgress({
     running.current = true;
     stop.current = false;
     setBusy(true);
-    setMessage('Preparing the remaining sources…');
+    setMessage('Preparing: hospital directory and inbox…');
     setResults([]);
+    setLines([]);
+    setIncomplete([]);
     setTotal(0);
+    try {
+      const status = await fetch('/api/collection/log?since=0', { cache: 'no-store' });
+      if (status.ok) seq.current = (await status.json()).seq ?? 0;
+    } catch {
+      seq.current = 0;
+    }
     let processed = 0,
       succeeded = 0,
       failed = 0,
       partial = 0,
       skipped = 0;
     try {
+      try {
+        const steps: { step: string; status: string; message: string }[] = await api({
+          command: 'prepare',
+        });
+        if (Array.isArray(steps))
+          setResults(steps.map((s) => ({ name: s.step, status: s.status, message: s.message })));
+      } catch (error) {
+        setResults([{ name: 'Preparation', status: 'failed', message: (error as Error).message }]);
+      }
       const fresh = await getPlan();
       setPlan(fresh);
+      const notSearched = fresh.sources
+        .filter((s) => s.state !== 'ready')
+        .map(
+          (s) =>
+            `${s.name} (${s.state === 'waiting' ? 'refreshed recently' : s.reasons[0] || 'needs setup'})`,
+        );
       const queue = fresh.sources
         .filter((s) => s.state === 'ready')
         .sort((a, b) => Number(!!a.lastSuccess) - Number(!!b.lastSuccess));
       setTotal(queue.length);
       if (!queue.length) {
+        setIncomplete(notSearched);
         setMessage('No sources are ready to search. See the setup and refresh details below.');
         return;
       }
+      const failedNames: string[] = [];
       for (const source of queue) {
         if (stop.current) break;
         setCurrent(source.id);
@@ -92,15 +163,20 @@ export function CollectionProgress({
             batches < 200
           );
           if (run.status === 'success') succeeded++;
-          else if (run.status === 'failed') failed++;
-          else if (run.status === 'partial') partial++;
-          else skipped++;
+          else if (run.status === 'failed') {
+            failed++;
+            failedNames.push(`${source.name} (failed: ${run.message})`);
+          } else if (run.status === 'partial') {
+            partial++;
+            failedNames.push(`${source.name} (partial: ${run.message})`);
+          } else skipped++;
           setResults((previous) => [
             ...previous,
             { name: source.name, status: run.status, message: run.message },
           ]);
         } catch (error) {
           failed++;
+          failedNames.push(`${source.name} (failed: ${(error as Error).message})`);
           setResults((previous) => [
             ...previous,
             { name: source.name, status: 'failed', message: (error as Error).message },
@@ -108,8 +184,13 @@ export function CollectionProgress({
         }
         processed++;
       }
+      setIncomplete([
+        ...failedNames,
+        ...queue.slice(processed).map((s) => `${s.name} (not reached)`),
+        ...notSearched,
+      ]);
       setMessage(
-        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${partial} partial · ${failed} failed · ${skipped} skipped. New records go to Review queue.`,
+        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${partial} partial · ${failed} failed · ${skipped} skipped. Check the feed and Review queue for new records.`,
       );
       setPlan(await getPlan());
       await reload();
@@ -158,14 +239,15 @@ export function CollectionProgress({
             onClick={search}
           >
             <RefreshCw size={15} />
-            {busy ? 'Searching…' : 'Search remaining ready sources'}
+            {busy ? 'Fetching…' : 'Fetch active vacancies'}
           </button>
           {busy && (
             <button
               className="button secondary small"
               onClick={() => {
                 stop.current = true;
-                setMessage('Stopping after the current small batch finishes…');
+                void api({ command: 'stop' }).catch(() => {});
+                setMessage('Stopping after the current page or small batch finishes…');
               }}
             >
               Stop after this batch
@@ -208,10 +290,11 @@ export function CollectionProgress({
             </p>
           )}
           <p className="small muted">
-            Search follows configured pages and job links within each source’s limits. A completed
-            scan covers that configured scope, not every possible website or hidden vacancy. Keep
-            this tab open while searching. Leaving Discover pauses after the current small batch;
-            saved progress resumes on your next search.
+            Fetching first loads the hospital directory and any exported recruiter emails, then
+            checks enabled sources that are due. Generic page, feed and Gmail collectors resume
+            saved batches. Agency-specific adapters check new listings within their own limits.
+            Partial results remain visible; a finished scan never means every possible vacancy is
+            covered. Keep this tab open while fetching.
           </p>
           <details className="collection-details">
             <summary>View all {plan.sources.length} sources and remaining work</summary>
@@ -277,7 +360,32 @@ export function CollectionProgress({
         </p>
       )}
       {busy && (
-        <progress aria-label="Collection progress" value={results.length} max={total || 1} />
+        <progress
+          aria-label="Collection progress"
+          value={results.filter((r) => plan?.sources.some((s) => s.name === r.name)).length}
+          max={total || 1}
+        />
+      )}
+      {(busy || !!lines.length) && (
+        <ol className="collection-log" aria-label="Collection log" ref={logBox}>
+          {!lines.length && <li className="muted">Waiting for the first collector message…</li>}
+          {lines.map((line) => (
+            <li key={line.seq} className={`log-${line.level}`}>
+              <time dateTime={line.at}>{clock(line.at)}</time> <strong>{line.sourceId}</strong>{' '}
+              {line.text}
+            </li>
+          ))}
+        </ol>
+      )}
+      {!busy && !!incomplete.length && (
+        <div className="collection-incomplete" role="alert">
+          <strong>Your list may be incomplete.</strong> Not collected in this run:
+          <ul>
+            {incomplete.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
       )}
       {!!results.length && (
         <ul className="collection-results">

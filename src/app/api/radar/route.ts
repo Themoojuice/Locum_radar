@@ -8,6 +8,9 @@ import { previewImport } from '@/server/extraction';
 import { collectSource, configIdentity } from '@/server/collectors';
 import { collectorConfigSchema } from '@/domain/acquisition';
 import { configForSource, sourceRecipes, sourceFromRecipe } from '@/domain/source-catalog';
+import { prepareCollection } from '@/server/maintenance';
+import { requestStop } from '@/server/progress';
+import { sourceAdapters } from '@/server/adapters/registry';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -45,6 +48,8 @@ const commandSchema = z.discriminatedUnion('command', [
   }),
   z.object({ command: z.literal('clear-evidence'), sourceId: z.string() }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
+  z.object({ command: z.literal('prepare') }),
+  z.object({ command: z.literal('stop') }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
   z.object({ command: z.literal('split'), listingId: z.string() }),
   z.object({ command: z.literal('resolve'), reviewId: z.string() }),
@@ -81,8 +86,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Import is too large' }, { status: 413 });
     const body = commandSchema.parse(JSON.parse(text));
     if (body.command === 'preview')
-      return NextResponse.json(await previewImport(body.content, body.sourceId, body.format));
-    if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
+      return NextResponse.json(
+        await previewImport(
+          body.content,
+          body.sourceId,
+          body.format,
+          (await readStore()).facilities,
+        ),
+      );
+    if (body.command === 'collect') {
+      requestStop(false);
+      return NextResponse.json(await collectSource(body.sourceId));
+    }
+    if (body.command === 'prepare') return NextResponse.json(await prepareCollection());
+    if (body.command === 'stop') {
+      requestStop();
+      return NextResponse.json({ ok: true });
+    }
     const result = await transaction((s) => {
       switch (body.command) {
         case 'catalog': {
@@ -97,7 +117,7 @@ export async function POST(request: Request) {
                 existing.permissionEvidence = recipe.accessRestriction;
                 existing.enabled = false;
               }
-              existing.method = 'collector';
+              existing.method = sourceAdapters[existing.id] ? 'json-api' : 'collector';
             }
           }
           return { ok: true };
@@ -175,7 +195,11 @@ export async function POST(request: Request) {
             body.enabled &&
             (body.permission !== 'approved' ||
               !body.permissionEvidence.trim() ||
-              !(body.collector || configForSource(source)))
+              !(
+                body.collector ||
+                configForSource(source) ||
+                (source.method === 'json-api' && sourceAdapters[source.id])
+              ))
           )
             throw new Error('Enable only a supported adapter with recorded access permission.');
           Object.assign(source, {

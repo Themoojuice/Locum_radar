@@ -102,9 +102,11 @@ export function SourcesView({
                 </div>
                 <p className="small muted">
                   {source.type} ·{' '}
-                  {source.method !== 'manual'
-                    ? `${configForSource(source)?.kind || 'Structured-page'} collector`
-                    : 'Manual import'}{' '}
+                  {source.method === 'json-api'
+                    ? 'Source-specific agency/API adapter'
+                    : source.method !== 'manual'
+                      ? `${configForSource(source)?.kind || 'Structured-page'} collector`
+                      : 'Manual import'}{' '}
                   · {source.permission === 'approved' ? 'Access recorded' : 'Access not approved'}
                 </p>
                 {source.qualification && <p className="small muted">{source.qualification}</p>}
@@ -133,7 +135,13 @@ export function SourcesView({
                     <button
                       className="button secondary small"
                       onClick={() =>
-                        setEdit({ ...source, collector: structuredClone(configForSource(source)) })
+                        setEdit({
+                          ...source,
+                          collector:
+                            source.method === 'json-api'
+                              ? undefined
+                              : structuredClone(configForSource(source)),
+                        })
                       }
                     >
                       Collection settings

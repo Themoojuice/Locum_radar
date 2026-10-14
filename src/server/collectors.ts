@@ -1,18 +1,38 @@
 import { randomUUID } from 'node:crypto';
 import { transaction, readStore } from './database';
-import { fingerprint } from '@/domain/ingestion';
+import { fingerprint, ingest } from '@/domain/ingestion';
 import { configForSource, sourceRecipes } from '@/domain/source-catalog';
 import { collectorConfigSchema } from '@/domain/acquisition';
-import type { CollectionRun, Store, Source } from '@/domain/model';
+import {
+  listingInputSchema,
+  type CollectionRun,
+  type Store,
+  type Source,
+  type Profile,
+} from '@/domain/model';
 import { initialFrontier, pageProcessor } from './acquisition/providers';
 import { canonicalUrl, type Candidate, type ParsedPage } from './acquisition/parsers';
-import { safeUrl } from './acquisition/transport';
+import { safeUrl, requestPage } from './acquisition/transport';
+import { fromLabelledBlock, type Extraction } from './extraction';
+import type { JsonBlock, SourceAdapter } from './adapters/json-sources';
+import { sourceAdapters } from './adapters/registry';
+import { log, stopRequested } from './progress';
 export { publicIpv4, robotsAllows } from './acquisition/transport';
 export const allowedSourceUrl = (url: string) =>
-  safeUrl(
+  safeUrl(url, [
+    ...sourceRecipes.flatMap((r) => r.config.allowedHosts),
+    ...Object.values(sourceAdapters).flatMap((a) => a.hosts),
+  ]);
+async function fetchPage(url: string, accept = 'text/html,text/plain') {
+  return requestPage(
     url,
-    sourceRecipes.flatMap((r) => r.config.allowedHosts),
+    [
+      ...sourceRecipes.flatMap((r) => r.config.allowedHosts),
+      ...Object.values(sourceAdapters).flatMap((a) => a.hosts),
+    ],
+    { Accept: accept },
   );
+}
 export function configIdentity(source: Source) {
   const config = configForSource(source);
   if (!config) return '';
@@ -72,9 +92,289 @@ const allowed = (source: Source) =>
   source.permission === 'approved' &&
   !!source.permissionEvidence.trim() &&
   source.method !== 'manual';
+/** Adds new extraction candidates to the review queue; returns how many were new. */
+export function queueExtractions(s: Store, sourceId: string, results: Extraction[]) {
+  let added = 0;
+  for (const result of results) {
+    const id = `extract-${fingerprint({ source: sourceId, raw: result.draft.rawText })}`;
+    if (s.reviews.some((r) => r.id === id)) continue;
+    s.reviews.push({
+      id,
+      kind: 'extraction',
+      opportunityId: null,
+      candidateId: null,
+      reason: result.issues.join(' '),
+      resolved: false,
+      draft: result.draft,
+      rawText: result.draft.rawText || '',
+      sourceId,
+    });
+    added++;
+  }
+  return added;
+}
+/**
+ * Path-aware robots check for adapters with recorded permission: allowed when
+ * no rule for `*` or LocumRadar disallows a path the adapter will request.
+ * Returns the crawl delay in milliseconds, or null when a path is disallowed.
+ */
+export function robotsDelayFor(text: string, paths: string[]): number | null {
+  if (!/user-agent\s*:/i.test(text)) return null;
+  let relevant = false,
+    sawRule = false,
+    delay = 0;
+  const disallowed: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, '').trim();
+    if (!line) continue;
+    const [key, ...rest] = line.split(':'),
+      value = rest.join(':').trim(),
+      k = key.trim().toLowerCase();
+    if (k === 'user-agent') {
+      if (sawRule) relevant = false;
+      sawRule = false;
+      relevant ||= value === '*' || /locumradar/i.test(value);
+      continue;
+    }
+    sawRule = true;
+    if (!relevant) continue;
+    if (k === 'disallow' && value) disallowed.push(value);
+    if (k === 'crawl-delay' && Number(value) > 0) delay = Math.max(delay, Number(value) * 1000);
+  }
+  const matches = (rule: string, path: string) => {
+    const pattern = new RegExp(
+      '^' +
+        rule
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*/g, '.*')
+          .replace(/\\\$$/, '$'),
+    );
+    return pattern.test(path);
+  };
+  return paths.some((p) => disallowed.some((rule) => matches(rule, p))) ? null : delay;
+}
+
+const knownExternalIds = (s: Store, sourceId: string) =>
+  new Set([
+    ...s.listings.filter((l) => l.sourceId === sourceId).map((l) => l.externalId),
+    ...s.reviews.filter((r) => r.sourceId === sourceId).map((r) => r.draft?.externalId ?? ''),
+  ]);
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Profile scope: preferred specialties and excluded states, when the profile sets them. */
+export function inProfileScope(profile: Profile, specialty: string | null, state: string | null) {
+  if (state && (profile.excludedStates as string[]).includes(state)) return false;
+  if (specialty && profile.preferredSpecialties.length)
+    return (profile.preferredSpecialties as string[]).includes(specialty);
+  return true;
+}
+
+/**
+ * Saves a run's candidates. Records that pass validation are imported straight
+ * into the feed (reconciliation still sends possible duplicates to review);
+ * everything else waits in the review queue. Set COLLECTOR_AUTO_IMPORT=false to
+ * review every record first.
+ */
+export function commitExtractions(
+  s: Store,
+  sourceId: string,
+  results: Extraction[],
+  autoImport = process.env.COLLECTOR_AUTO_IMPORT !== 'false',
+) {
+  const tally = { imported: 0, unchanged: 0, queued: 0 };
+  for (const result of results) {
+    const parsed = autoImport ? listingInputSchema.safeParse(result.draft) : null;
+    if (parsed?.success) {
+      try {
+        const outcome = ingest(s, parsed.data);
+        if (outcome.unchanged) tally.unchanged++;
+        else tally.imported++;
+        continue;
+      } catch (error) {
+        result.issues.push(`Automatic import failed: ${(error as Error).message}`);
+      }
+    }
+    tally.queued += queueExtractions(s, sourceId, [result]);
+  }
+  return tally;
+}
+export const describeTally = (t: { imported: number; unchanged: number; queued: number }) =>
+  `${t.imported} new or updated vacancies imported, ${t.unchanged} unchanged, ${t.queued} sent to Review queue.`;
+
+/**
+ * Runs one adapter. Paged adapters go newest first and stop at the first page
+ * whose vacancies have all been seen before, so routine runs are short.
+ */
+async function runAdapter(adapter: SourceAdapter, sourceId: string) {
+  let incomplete = false;
+  const store = await readStore();
+  const missing = adapter.missingConfig?.(process.env);
+  if (missing) throw new Error(`Needs configuration: ${missing}.`);
+  let delay = Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 1500);
+  if (adapter.access === 'site-endpoint') {
+    const robots = await fetchPage(adapter.robotsUrl!, 'text/plain');
+    const paths =
+      'pageUrl' in adapter
+        ? [new URL(adapter.pageUrl(1, process.env)!).pathname]
+        : ['/wp-json/wp/v2/job_posts', '/doctors/jobs-board/'];
+    const robotsDelay = robots.status === 200 ? robotsDelayFor(robots.text, paths) : null;
+    if (robots.status !== 404 && robotsDelay === null)
+      throw new Error('Robots rules disallow the pages this collector needs; stopped.');
+    delay = Math.max(delay, robotsDelay ?? 0);
+  }
+  const seen = knownExternalIds(store, sourceId);
+  const say = (text: string, level: 'info' | 'warn' | 'error' = 'info') => {
+    if (level !== 'info' || /nothing new; stopping early/i.test(text)) incomplete = true;
+    log(sourceId, text, level);
+  };
+  const get = (url: string, accept: string) => fetchPage(url, accept);
+  let blocks: JsonBlock[] = [];
+  let outOfScope = 0;
+  const inScope = (specialty: string | null, state: string | null) =>
+    inProfileScope(store.profile, specialty, state);
+  if ('collect' in adapter) {
+    blocks = await adapter.collect({
+      get,
+      pause: () => pause(delay),
+      seen,
+      inScope,
+      log: say,
+      stopped: stopRequested,
+      env: process.env,
+    });
+  } else {
+    for (let page = 1; page <= adapter.maxPages; page++) {
+      if (stopRequested()) {
+        say(`Stopped on request after ${page - 1} page(s).`, 'warn');
+        break;
+      }
+      const url = adapter.pageUrl(page, process.env);
+      if (!url) throw new Error('This source needs configuration (for example an API key) first.');
+      if (page > 1) await pause(delay);
+      let response = await fetchPage(
+        url,
+        adapter.format === 'html' ? 'text/html' : 'application/json',
+      );
+      if (response.status >= 500) {
+        say(`Page ${page} returned HTTP ${response.status}; retrying once.`, 'warn');
+        await pause(delay * 2);
+        response = await fetchPage(
+          url,
+          adapter.format === 'html' ? 'text/html' : 'application/json',
+        );
+      }
+      if (response.status !== 200)
+        throw new Error(
+          `Page ${page} returned HTTP ${response.status}; historical vacancies were retained.`,
+        );
+      let body: unknown = response.text;
+      if (adapter.format !== 'html') {
+        try {
+          body = JSON.parse(response.text);
+        } catch {
+          throw new Error('Source did not return JSON. The endpoint may have changed.');
+        }
+      }
+      const parsed = adapter.parse(body);
+      blocks.push(...parsed.blocks);
+      const unseen = parsed.blocks.filter(
+        (b) => !seen.has(b.labelled.match(/^Listing ID: (.+)$/m)?.[1] ?? ''),
+      );
+      if (page === 1 || page % 10 === 0)
+        say(
+          `Page ${page}: ${parsed.blocks.length} locum listings, ${unseen.length} not seen before.`,
+        );
+      if (!parsed.hasMore) {
+        say(`Reached the last page (${page}).`);
+        break;
+      }
+      if (parsed.blocks.length > 0 && unseen.length === 0) {
+        say(`Page ${page} holds nothing new; stopping early.`);
+        break;
+      }
+      if (page === adapter.maxPages) say(`Stopped at the page limit (${page}).`, 'warn');
+    }
+  }
+  const results: Extraction[] = [];
+  for (const b of blocks) {
+    const r = fromLabelledBlock(b, sourceId, `${sourceId}-adapter`, store.facilities);
+    r.draft.url = b.url;
+    if (!inScope(r.draft.specialty ?? null, r.draft.state ?? null)) {
+      outOfScope++;
+      continue;
+    }
+    results.push(r);
+  }
+  if (outOfScope)
+    say(
+      `${outOfScope} listings fall outside your profile's specialties or states and were skipped.`,
+    );
+  return { results, incomplete: incomplete || stopRequested() };
+}
+/** Retain the existing agency-specific incremental adapters and automatic-import preference. */
+async function collectNativeSource(source: Source): Promise<CollectionRun> {
+  const record: CollectionRun = {
+    id: randomUUID(),
+    sourceId: source.id,
+    startedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    status: 'skipped',
+    count: 0,
+    message: '',
+  };
+  const adapter = sourceAdapters[source.id];
+  if (!allowed(source) || !adapter)
+    return { ...record, message: 'Collection is disabled or access review is missing.' };
+  const acquired = await transaction((s) => {
+    const current = s.sources.find((v) => v.id === source.id)!;
+    if (
+      !allowed(current) ||
+      current.method !== 'json-api' ||
+      (current.lastAttempt &&
+        Date.now() - Date.parse(current.lastAttempt) < current.intervalHours * 3600000)
+    )
+      return false;
+    current.lastAttempt = record.startedAt;
+    return true;
+  });
+  if (!acquired) return { ...record, message: 'Not due yet; the collection interval is enforced.' };
+  try {
+    log(source.id, `Starting ${source.name}.`);
+    const { results, incomplete } = await runAdapter(adapter, source.id);
+    const tally = await transaction((s) => {
+      const current = s.sources.find((v) => v.id === source.id)!;
+      if (!allowed(current) || current.method !== 'json-api')
+        throw new Error('Source disabled or changed during collection; no fetched records saved');
+      return commitExtractions(s, source.id, results);
+    });
+    record.count = tally.imported + tally.queued;
+    record.status = incomplete ? 'partial' : 'success';
+    record.message = `${results.length} listings read. ${describeTally(tally)}${incomplete ? ' Incremental, stopped or limited scan; full coverage was not established. See the collection log.' : ''}`;
+  } catch (error) {
+    record.status = 'failed';
+    record.message = error instanceof Error ? error.message : 'Collection failed';
+  }
+  record.completedAt = new Date().toISOString();
+  log(
+    source.id,
+    record.message,
+    record.status === 'failed' ? 'error' : record.status === 'partial' ? 'warn' : 'info',
+  );
+  await transaction((s) => {
+    const current = s.sources.find((v) => v.id === source.id)!;
+    if (record.status === 'success') {
+      current.lastSuccess = record.completedAt;
+      current.error = null;
+    } else current.error = record.message;
+    s.runs.unshift(record);
+    s.runs = s.runs.slice(0, 300);
+  });
+  return record;
+}
 export async function collectSource(sourceId: string) {
   const original = (await readStore()).sources.find((s) => s.id === sourceId);
   if (!original) throw new Error('Unknown source');
+  if (original.method === 'json-api') return collectNativeSource(original);
   const record: CollectionRun = {
     id: randomUUID(),
     sourceId,
@@ -147,7 +447,9 @@ export async function collectSource(sourceId: string) {
   let crawl = claimed;
   try {
     for (let batch = 0; batch < 3 && crawl.queue.length; batch++) {
+      if (stopRequested()) break;
       const item = crawl.queue[0];
+      log(sourceId, `Checking ${item.kind}; ${crawl.pages} checked, ${crawl.queue.length} queued.`);
       let result: ParsedPage | undefined, problem: string | undefined;
       try {
         result = await processPage(item);
@@ -227,6 +529,7 @@ export async function collectSource(sourceId: string) {
           ? 'failed'
           : 'partial';
     record.message = `${crawl.pages} pages/messages checked; ${record.count} new review records; ${crawl.queue.length} queued.${crawl.limited ? ' Scan budget reached; coverage is partial.' : ''}${crawl.errors.length ? ' Issues: ' + [...new Set(crawl.errors)].slice(0, 4).join(' · ') : ''}`;
+    log(sourceId, record.message, record.status === 'success' ? 'info' : 'warn');
   } catch (error) {
     record.status = 'failed';
     record.message =

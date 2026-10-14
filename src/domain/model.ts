@@ -145,13 +145,15 @@ export interface Facility {
   adventure: number | null;
   adventureNote: string;
   coverage: 'observed' | 'unknown' | 'excluded';
+  /** Present for directory entries; undefined for facilities added by hand or from ads. */
+  sector?: 'public' | 'private';
 }
 export interface Source {
   id: string;
   name: string;
   url: string;
   type: 'agency' | 'government' | 'email' | 'manual' | 'discovery' | 'aggregator';
-  method: 'manual' | 'jsonld' | 'collector';
+  method: 'manual' | 'jsonld' | 'json-api' | 'collector';
   collector?: import('./acquisition').CollectorConfig;
   crawl?: import('./acquisition').CrawlState;
   qualification?: string;

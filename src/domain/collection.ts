@@ -5,7 +5,7 @@ export function collectionPlan(
   store: Store,
   enabled: boolean,
   now = Date.now(),
-  setup: Record<string, string[]> = {},
+  setup: Record<string, string[] | string> = {},
 ) {
   const sources = store.sources
     .filter((s) => s.type !== 'manual' && (s.type !== 'email' || s.method === 'collector'))
@@ -15,10 +15,14 @@ export function collectionPlan(
         : null;
       const reasons: string[] = [];
       const config = configForSource(source),
-        crawl = source.crawl;
-      if (source.method === 'manual' || !config) reasons.push('Choose a collector recipe');
+        crawl = source.method === 'json-api' ? undefined : source.crawl;
+      if (source.method === 'manual' || (!config && source.method !== 'json-api'))
+        reasons.push('Choose a collector recipe');
       if (config?.kind === 'gmail' && !config.labelId) reasons.push('Select a Gmail label');
-      reasons.push(...(setup[config?.kind || ''] || []));
+      for (const key of new Set([source.id, config?.kind || ''])) {
+        const reason = setup[key];
+        if (reason) reasons.push(...(Array.isArray(reason) ? reason : [reason]));
+      }
       if (
         crawl &&
         !crawl.complete &&
@@ -54,7 +58,9 @@ export function collectionPlan(
         imported: store.listings.filter((l) => l.sourceId === source.id).length,
         pages: crawl?.pages || 0,
         remaining: crawl?.queue.length || 0,
-        partial: !!crawl && (!crawl.complete || !!crawl.errors.length),
+        partial:
+          (!!crawl && (!crawl.complete || !!crawl.errors.length)) ||
+          latestRun?.status === 'partial',
         active,
         qualification: source.qualification || '',
       };

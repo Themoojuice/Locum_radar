@@ -12,14 +12,12 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await expect(page.getByRole('heading', { name: 'Find your next chapter.' })).toBeVisible();
   await expect(page.getByText('Fictional vacancies and a sample doctor profile.')).toBeVisible();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await expect(coverage.getByText('0 / 12', { exact: true })).toBeVisible();
-  await expect(
-    coverage.getByRole('button', { name: 'Search remaining ready sources' }),
-  ).toBeDisabled();
-  await coverage.getByText('View all 12 sources and remaining work', { exact: true }).click();
+  await expect(coverage.getByText('0 / 14', { exact: true })).toBeVisible();
+  await expect(coverage.getByRole('button', { name: 'Fetch active vacancies' })).toBeDisabled();
+  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
   await expect(coverage.getByText('Medrecruit', { exact: true })).toBeVisible();
-  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(12);
-  await coverage.getByText('View all 12 sources and remaining work', { exact: true }).click();
+  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(14);
+  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
   await page.screenshot({ path: 'test-results/radar-desktop.png', fullPage: true });
   await page.getByRole('textbox', { name: 'Search opportunities' }).fill('Cairns');
   await expect(page.locator('.job-card')).toHaveCount(1);
@@ -62,7 +60,7 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
 
 test('bulk search attempts every ready source and continues after a failure', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => s.method === 'jsonld')) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
     source.enabled = true;
     source.permission = 'approved';
     source.permissionEvidence = 'Mock only';
@@ -88,12 +86,14 @@ test('bulk search attempts every ready source and continues after a failure', as
   if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
+  await coverage.getByRole('button', { name: 'Fetch active vacancies' }).click();
   await expect(coverage.getByRole('status')).toContainText(
     '2 of 2 attempted · 1 succeeded · 0 partial · 1 failed',
   );
   expect(attempted).toEqual(['medrecruit', 'ochre']);
-  await expect(coverage.getByText('Fixture failure', { exact: false })).toBeVisible();
+  await expect(
+    coverage.getByText('Medrecruit (failed: Fixture failure)', { exact: true }),
+  ).toBeVisible();
 });
 
 test('real workspace: import two sources, preserve offers, save notes and reload', async ({
@@ -157,7 +157,7 @@ test('real workspace: import two sources, preserve offers, save notes and reload
 
 test('bulk search can stop after the active source without starting another', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => s.method === 'jsonld')) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
     Object.assign(source, {
       enabled: true,
       permission: 'approved',
@@ -185,7 +185,7 @@ test('bulk search can stop after the active source without starting another', as
   if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
+  await coverage.getByRole('button', { name: 'Fetch active vacancies' }).click();
   await expect.poll(() => attempted.length).toBe(1);
   await coverage.getByRole('button', { name: 'Stop after this batch' }).click();
   release();
@@ -244,7 +244,7 @@ test('Discover drains resumable batches and reports a limited source as partial'
   if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
+  await coverage.getByRole('button', { name: 'Fetch active vacancies' }).click();
   await expect(coverage.getByRole('status')).toContainText('0 succeeded · 1 partial');
   expect(batches).toBe(2);
 });
@@ -256,6 +256,15 @@ test('source catalog exposes label-only Gmail setup and saves a custom feed', as
     await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Sources', exact: true }).click();
   await page.getByRole('button', { name: 'Add / update collector recipes' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }),
+  ).toBeVisible();
+  const installed = await (await page.request.get('/api/radar')).json();
+  for (const id of ['medrecruit', '1medical', 'wavelength', 'adzuna']) {
+    expect(installed.sources.find((source: { id: string }) => source.id === id).method).toBe(
+      'json-api',
+    );
+  }
   const gmail = page
     .locator('.source-card')
     .filter({ has: page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }) });

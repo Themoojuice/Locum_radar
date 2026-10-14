@@ -8,9 +8,12 @@ import {
   specialties,
   grades,
   states,
+  type Facility,
   type ListingInput,
 } from '@/domain/model';
 import { emptyStore } from '@/domain/seed';
+import { detectEmailFormat, splitRecruiterEmail, type EmailParts } from './adapters/email-formats';
+import { resolveFacility } from './adapters/myhospitals';
 
 export const plainText = (html: string) => {
   const $ = load(html);
@@ -22,6 +25,25 @@ export const plainText = (html: string) => {
 export interface Extraction {
   draft: Partial<ListingInput>;
   issues: string[];
+}
+/**
+ * Runs the conservative parser over labelled fields produced by a source
+ * adapter, while keeping the original block as the reviewable raw text.
+ */
+export function fromLabelledBlock(
+  block: { labelled: string; raw: string; notes: string[] },
+  sourceId: string,
+  evidenceLabel: string,
+  facilities?: Facility[],
+): Extraction {
+  const result = extractText(block.labelled, sourceId, facilities);
+  result.draft.rawText = block.raw.trim() || block.labelled;
+  result.draft.evidence = {
+    adapter: evidenceLabel,
+    derivedFields: block.labelled.slice(0, 2000),
+  };
+  result.issues.push(...block.notes);
+  return result;
 }
 function field(text: string, label: string) {
   return text.match(new RegExp(`^${label}\\s*:\\s*(.+)$`, 'im'))?.[1].trim();
@@ -69,7 +91,11 @@ function explicitRange(text: string): [string, string] | null {
   const prefix = `${m[4]}-${String(month).padStart(2, '0')}`;
   return [`${prefix}-${m[1].padStart(2, '0')}`, `${prefix}-${m[2].padStart(2, '0')}`];
 }
-export function extractText(rawText: string, sourceId: string): Extraction {
+export function extractText(
+  rawText: string,
+  sourceId: string,
+  facilities: Facility[] = emptyStore().facilities,
+): Extraction {
   const text = /<(html|body|div|p)[\s>]/i.test(rawText) ? plainText(rawText) : rawText;
   const title =
     field(text, 'Title') ||
@@ -78,10 +104,19 @@ export function extractText(rawText: string, sourceId: string): Extraction {
       .find((v) => v.trim())
       ?.slice(0, 200) ||
     '';
-  const known = emptyStore().facilities.filter((f) =>
-    [f.name, ...f.aliases].some((alias) => text.toLowerCase().includes(alias.toLowerCase())),
-  );
-  const facility = known.length === 1 ? known[0] : null;
+  // A labelled facility is resolved against the directory; free text is only
+  // searched for curated facilities, because short directory aliases ("Orange")
+  // would match ordinary words.
+  const hospitalLabel = field(text, '(?:Facility|Hospital)');
+  const labelledState = states.find((v) => v === field(text, 'State')?.toUpperCase()) ?? null;
+  const curated = facilities
+    .filter((f) => !f.id.startsWith('aihw-'))
+    .filter((f) =>
+      [f.name, ...f.aliases].some((alias) => text.toLowerCase().includes(alias.toLowerCase())),
+    );
+  const { facility, note: facilityNote } = hospitalLabel
+    ? resolveFacility(hospitalLabel, labelledState, facilities)
+    : { facility: curated.length === 1 ? curated[0] : null, note: null };
   const inferredSpecialties = specialties.filter(
     (s) =>
       title.toLowerCase().includes(s.toLowerCase()) ||
@@ -129,7 +164,7 @@ export function extractText(rawText: string, sourceId: string): Extraction {
     url: field(text, '(?:URL|Link)') || null,
     rawText,
     title,
-    facilityName: field(text, '(?:Facility|Hospital)') || facility?.name || '',
+    facilityName: facility?.name || hospitalLabel || '',
     town: field(text, '(?:Town|City)') || facility?.town || '',
     ...(state ? { state } : {}),
     ...(specialty ? { specialty } : {}),
@@ -186,6 +221,7 @@ export function extractText(rawText: string, sourceId: string): Extraction {
   const issues = result.success
     ? []
     : result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+  if (facilityNote) issues.push(facilityNote);
   if (!rate) issues.push('Rate is absent or ambiguous. It remains unknown until reviewed.');
   if (draft.requirements && !draft.requirements.complete)
     issues.push('Requirements are incomplete; this is not an eligibility confirmation.');
@@ -195,6 +231,7 @@ export async function previewImport(
   content: string,
   sourceId: string,
   format: 'text' | 'eml' | 'json',
+  facilities?: Facility[],
 ): Promise<Extraction[]> {
   if (format === 'json') {
     const parsed: unknown = JSON.parse(content),
@@ -215,6 +252,7 @@ export async function previewImport(
   }
   let text = content,
     attachmentWarning = '';
+  const emailParts: EmailParts = { text: content };
   if (format === 'eml') {
     const message = await simpleParser(content, {
       skipHtmlToText: false,
@@ -224,21 +262,45 @@ export async function previewImport(
     text = message.text || (message.html ? plainText(message.html) : '');
     if (!text.trim())
       throw new Error('No readable email body. Paste the relevant advertisement instead.');
-    if (message.attachments.length)
+    if (message.attachments.some((a) => !/^image\//.test(a.contentType)))
       attachmentWarning =
         'Email attachments are not extracted in this draft. Import the relevant text separately.';
+    Object.assign(emailParts, {
+      text,
+      html: message.html || undefined,
+      from: message.from?.text,
+      subject: message.subject,
+      sentAt: message.date,
+    });
+  }
+  // Known multi-vacancy recruiter formats are split row by row before parsing.
+  const recognised = detectEmailFormat(emailParts);
+  if (recognised) {
+    const blocks = splitRecruiterEmail(recognised, emailParts);
+    if (blocks.length > 100) throw new Error('Import at most 100 advertisements at a time');
+    if (blocks.length)
+      return blocks.map((b) => {
+        const result = fromLabelledBlock(b, sourceId, recognised, facilities);
+        if (attachmentWarning) result.issues.push(attachmentWarning);
+        return result;
+      });
   }
   const parts = text.split(/\n\s*---+\s*\n/).filter((t) => t.trim());
   if (!parts.length || parts.length > 100)
     throw new Error('Import between 1 and 100 advertisements, separated by a line containing ---');
   return parts.map((part) => {
-    const result = extractText(part.trim(), sourceId);
+    const result = extractText(part.trim(), sourceId, facilities);
     if (attachmentWarning) result.issues.push(attachmentWarning);
     return result;
   });
 }
 
-export function extractJobPostings(html: string, sourceId: string, url: string): Extraction[] {
+export function extractJobPostings(
+  html: string,
+  sourceId: string,
+  url: string,
+  facilities?: Facility[],
+): Extraction[] {
   const $ = load(html),
     postings: Record<string, unknown>[] = [];
   const walk = (node: unknown, depth = 0) => {
@@ -260,7 +322,7 @@ export function extractJobPostings(html: string, sourceId: string, url: string):
   return postings.map((record) => {
     const description = plainText(typeof record.description === 'string' ? record.description : '');
     const raw = `Title: ${String(record.title || '')}\nURL: ${url}\n${description}`;
-    const result = extractText(raw, sourceId);
+    const result = extractText(raw, sourceId, facilities);
     const identifier = record.identifier;
     const id =
       typeof identifier === 'string'

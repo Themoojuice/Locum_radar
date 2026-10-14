@@ -54,6 +54,19 @@ export function findFacility(store: Store, input: ListingInput): Facility {
       normaliseName(f.town) === normaliseName(input.town),
   );
   if (match) return match;
+  // Directory hospitals are unique by name within a state; their derived towns
+  // are approximate, so an advertised town fills or overrides nothing else.
+  const directory = store.facilities.find(
+    (f) =>
+      f.id.startsWith('aihw-') &&
+      f.state === input.state &&
+      [f.name, ...f.aliases].some((n) => normaliseName(n) === normaliseName(input.facilityName)),
+  );
+  if (directory) {
+    if (!directory.town) directory.town = input.town;
+    if (directory.coverage === 'unknown') directory.coverage = 'observed';
+    return directory;
+  }
   const facility: Facility = {
     id: randomUUID(),
     name: input.facilityName,
