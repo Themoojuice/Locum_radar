@@ -55,6 +55,7 @@ export function CollectionProgress({
     let processed = 0,
       succeeded = 0,
       failed = 0,
+      partial = 0,
       skipped = 0;
     try {
       const fresh = await getPlan();
@@ -72,9 +73,27 @@ export function CollectionProgress({
         setCurrent(source.id);
         setMessage(`Searching ${source.name} (${processed + 1} of ${queue.length})…`);
         try {
-          const run: CollectionRun = await api({ command: 'collect', sourceId: source.id });
+          let run: CollectionRun;
+          let batches = 0;
+          let resumable = true;
+          do {
+            run = await api({ command: 'collect', sourceId: source.id });
+            batches++;
+            setMessage(`${source.name}: ${run.message}`);
+            const updated = await getPlan();
+            setPlan(updated);
+            resumable = updated.sources.some((s) => s.id === source.id && s.state === 'ready');
+          } while (
+            !stop.current &&
+            resumable &&
+            run.status === 'partial' &&
+            !!run.remaining &&
+            !run.limited &&
+            batches < 200
+          );
           if (run.status === 'success') succeeded++;
           else if (run.status === 'failed') failed++;
+          else if (run.status === 'partial') partial++;
           else skipped++;
           setResults((previous) => [
             ...previous,
@@ -90,7 +109,7 @@ export function CollectionProgress({
         processed++;
       }
       setMessage(
-        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${failed} failed · ${skipped} skipped. New records go to Review queue.`,
+        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${partial} partial · ${failed} failed · ${skipped} skipped. New records go to Review queue.`,
       );
       setPlan(await getPlan());
       await reload();
@@ -146,10 +165,10 @@ export function CollectionProgress({
               className="button secondary small"
               onClick={() => {
                 stop.current = true;
-                setMessage('Stopping after the current source finishes…');
+                setMessage('Stopping after the current small batch finishes…');
               }}
             >
-              Stop after this source
+              Stop after this batch
             </button>
           )}
         </div>
@@ -189,10 +208,10 @@ export function CollectionProgress({
             </p>
           )}
           <p className="small muted">
-            Search covers registered, enabled sources that are due. The current collectors check one
-            configured page per source; they do not yet search every page or every possible website.
-            Keep this tab open while searching; leaving Discover stops the queue after the current
-            source.
+            Search follows configured pages and job links within each source’s limits. A completed
+            scan covers that configured scope, not every possible website or hidden vacancy. Keep
+            this tab open while searching. Leaving Discover pauses after the current small batch;
+            saved progress resumes on your next search.
           </p>
           <details className="collection-details">
             <summary>View all {plan.sources.length} sources and remaining work</summary>
@@ -212,6 +231,12 @@ export function CollectionProgress({
                     )}
                     {source.error && <p className="small error">Last error: {source.error}</p>}
                     {source.lastResult && <p className="small muted">{source.lastResult}</p>}
+                    {!!source.pages && (
+                      <p className="small">
+                        {source.pages} pages/messages checked · {source.remaining} queued{' '}
+                        {source.partial ? '· Partial coverage' : '· Configured scan finished'}
+                      </p>
+                    )}
                     <p className="small">
                       {source.reasons.join(' · ') ||
                         (source.state === 'waiting' && source.nextAttempt

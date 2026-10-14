@@ -150,8 +150,11 @@ export interface Source {
   id: string;
   name: string;
   url: string;
-  type: 'agency' | 'government' | 'email' | 'manual';
-  method: 'manual' | 'jsonld';
+  type: 'agency' | 'government' | 'email' | 'manual' | 'discovery' | 'aggregator';
+  method: 'manual' | 'jsonld' | 'collector';
+  collector?: import('./acquisition').CollectorConfig;
+  crawl?: import('./acquisition').CrawlState;
+  qualification?: string;
   permission: 'unreviewed' | 'approved' | 'denied';
   permissionEvidence: string;
   enabled: boolean;
@@ -213,7 +216,10 @@ export interface CollectionRun {
   sourceId: string;
   startedAt: string;
   completedAt: string;
-  status: 'success' | 'failed' | 'skipped';
+  status: 'success' | 'partial' | 'failed' | 'skipped';
+  pages?: number;
+  remaining?: number;
+  limited?: boolean;
   count: number;
   message: string;
 }
@@ -240,6 +246,7 @@ export interface Store {
   observations: Observation[];
   runs: CollectionRun[];
   reviews: ReviewItem[];
+  documents: import('./acquisition').AcquisitionDocument[];
 }
 export const defaultProfile: Profile = {
   name: 'My profile',

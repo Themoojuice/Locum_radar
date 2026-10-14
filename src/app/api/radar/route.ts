@@ -5,7 +5,9 @@ import { readStore, transaction } from '@/server/database';
 import { listingInputSchema, profileSchema, stages } from '@/domain/model';
 import { ingest, mergeOpportunities, splitListing } from '@/domain/ingestion';
 import { previewImport } from '@/server/extraction';
-import { collectSource } from '@/server/collectors';
+import { collectSource, configIdentity } from '@/server/collectors';
+import { collectorConfigSchema } from '@/domain/acquisition';
+import { configForSource, sourceRecipes, sourceFromRecipe } from '@/domain/source-catalog';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -33,7 +35,15 @@ const commandSchema = z.discriminatedUnion('command', [
     permission: z.enum(['unreviewed', 'approved', 'denied']),
     permissionEvidence: z.string().max(3000),
     enabled: z.boolean(),
+    collector: collectorConfigSchema.optional(),
   }),
+  z.object({ command: z.literal('catalog') }),
+  z.object({
+    command: z.literal('add-source'),
+    name: z.string().min(1).max(150),
+    collector: collectorConfigSchema,
+  }),
+  z.object({ command: z.literal('clear-evidence'), sourceId: z.string() }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
   z.object({ command: z.literal('merge'), from: z.string(), to: z.string() }),
   z.object({ command: z.literal('split'), listingId: z.string() }),
@@ -44,9 +54,14 @@ export async function GET(request: Request) {
   try {
     if (!authenticated(request))
       return NextResponse.json({ error: 'Sign in to access your radar' }, { status: 401 });
-    return NextResponse.json(await readStore(), {
-      headers: { 'Cache-Control': 'private, no-store' },
-    });
+    const store = await readStore();
+    // Evidence versions stay on the server; current review drafts already contain their relevant text.
+    return NextResponse.json(
+      { ...store, documents: [] },
+      {
+        headers: { 'Cache-Control': 'private, no-store' },
+      },
+    );
   } catch (error) {
     console.error('Radar read failed:', error instanceof Error ? error.message : 'Unknown');
     return NextResponse.json(
@@ -70,6 +85,58 @@ export async function POST(request: Request) {
     if (body.command === 'collect') return NextResponse.json(await collectSource(body.sourceId));
     const result = await transaction((s) => {
       switch (body.command) {
+        case 'catalog': {
+          for (const recipe of sourceRecipes) {
+            const existing = s.sources.find((v) => v.id === recipe.id);
+            if (!existing) s.sources.push(sourceFromRecipe(recipe));
+            else {
+              existing.collector ??= structuredClone(recipe.config);
+              existing.qualification = recipe.qualification;
+              if (recipe.accessRestriction && existing.permission === 'unreviewed') {
+                existing.permission = 'denied';
+                existing.permissionEvidence = recipe.accessRestriction;
+                existing.enabled = false;
+              }
+              existing.method = 'collector';
+            }
+          }
+          return { ok: true };
+        }
+        case 'add-source': {
+          const id = 'custom-' + crypto.randomUUID();
+          s.sources.push({
+            id,
+            name: body.name,
+            url: body.collector.startUrls[0] || 'https://search.brave.com/',
+            type: 'discovery',
+            method: 'collector',
+            collector: body.collector,
+            permission: 'unreviewed',
+            permissionEvidence: '',
+            enabled: false,
+            intervalHours: 24,
+            lastSuccess: null,
+            lastAttempt: null,
+            error: null,
+          });
+          return { id };
+        }
+        case 'clear-evidence': {
+          const source = s.sources.find((v) => v.id === body.sourceId);
+          if (
+            !source ||
+            source.enabled ||
+            (source.crawl?.leaseUntil && Date.parse(source.crawl.leaseUntil) > Date.now())
+          )
+            throw new Error(
+              'Disable the source and wait for any active batch before clearing its evidence',
+            );
+          s.documents = s.documents.filter((d) => d.sourceId !== source.id);
+          s.reviews = s.reviews.filter((r) => r.sourceId !== source.id || r.kind !== 'extraction');
+          delete source.crawl;
+          source.lastSuccess = null;
+          return { ok: true };
+        }
         case 'profile':
           s.profile = body.profile;
           return { ok: true };
@@ -97,16 +164,25 @@ export async function POST(request: Request) {
           const source = s.sources.find((v) => v.id === body.sourceId);
           if (!source) throw new Error('Source not found');
           if (
+            body.collector &&
+            configIdentity(source) !== configIdentity({ ...source, collector: body.collector })
+          ) {
+            if (source.crawl?.leaseUntil && Date.parse(source.crawl.leaseUntil) > Date.now())
+              throw new Error('Wait for the current batch before changing the search scope');
+            delete source.crawl;
+          }
+          if (
             body.enabled &&
             (body.permission !== 'approved' ||
               !body.permissionEvidence.trim() ||
-              source.method !== 'jsonld')
+              !(body.collector || configForSource(source)))
           )
             throw new Error('Enable only a supported adapter with recorded access permission.');
           Object.assign(source, {
             permission: body.permission,
             permissionEvidence: body.permissionEvidence,
             enabled: body.enabled,
+            ...(body.collector ? { collector: body.collector, method: 'collector' } : {}),
           });
           return { ok: true };
         }

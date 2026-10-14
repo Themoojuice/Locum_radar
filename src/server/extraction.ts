@@ -261,6 +261,29 @@ export function extractJobPostings(html: string, sourceId: string, url: string):
     const description = plainText(typeof record.description === 'string' ? record.description : '');
     const raw = `Title: ${String(record.title || '')}\nURL: ${url}\n${description}`;
     const result = extractText(raw, sourceId);
+    const identifier = record.identifier;
+    const id =
+      typeof identifier === 'string'
+        ? identifier
+        : identifier && typeof identifier === 'object' && 'value' in identifier
+          ? String(identifier.value)
+          : null;
+    let canonical: string | null = null;
+    try {
+      const target = new URL(typeof record.url === 'string' ? record.url : url, url);
+      if (['https:', 'http:'].includes(target.protocol) && !target.username && !target.password)
+        canonical = target.href;
+    } catch {
+      /* Keep the fetched page URL when the source supplies an invalid link. */
+    }
+    result.draft.url = canonical || url;
+    result.draft.externalId =
+      id ||
+      (postings.length === 1
+        ? canonical || url
+        : createHash('sha256')
+            .update(String(record.title) + description)
+            .digest('hex'));
     result.issues.unshift(
       'Review the original advertisement. Posting dates and validThrough are not placement dates.',
     );

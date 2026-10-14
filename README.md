@@ -2,7 +2,7 @@
 
 A private workspace for finding and comparing Australian medical locum opportunities, with 2027 planning as the initial focus.
 
-**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Public collectors are disabled and have not been qualified against live boards. No email account, calendar account, hosted service or paid AI service is connected.
+**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Resumable acquisition supports public pages, feeds, sitemaps, Adzuna, recent web/forum leads and a selected Gmail label. Source qualification and missing setup are explicit. No email account, paid API or hosted service is connected by default.
 
 ![The fictional example workspace](docs/screenshots/radar-desktop.png)
 
@@ -22,7 +22,7 @@ Open **http://127.0.0.1:3000**. The server binds only to your computer's loopbac
 3. Choose **Import opportunities**. Paste an advertisement, upload a `.txt`, `.html`, `.eml` or `.json` file, and review before saving. Choose the correct source.
 4. Use **Review queue** for unknown requirements and possible duplicate matches. Save interesting jobs, compare up to four, and keep recruiter questions in private notes.
 
-See [the import guide](docs/importing.md) for supported fields. Free-form extraction recognises a limited set of explicit patterns; arbitrary recruiter formats and attachments still require review or transcription.
+See [the import guide](docs/importing.md) for supported fields and [the acquisition guide](docs/acquisition-plan.md) for collector recipes, Gmail setup, API options and source qualification. Free-form extraction recognises a limited set of explicit patterns; arbitrary recruiter formats and attachments still require review or transcription.
 
 ## What works
 
@@ -32,16 +32,16 @@ See [the import guide](docs/importing.md) for supported fields. Free-form extrac
 - Hourly/day/shift/placement terms, paid units, super, on-call treatment, personal expenses and temporary cost scenarios. Unknown numbers stay unknown.
 - Six ranking presets and adjustable weights. Missing criteria are omitted and remaining weights normalised. Scoring evidence is displayed separately. Withdrawn offers remain in history and are excluded from ranking.
 - Search and filters, shortlist, side-by-side comparison, 2027 placement timeline with overlaps, schematic geographic explorer, small starter facility directory, source registry and source health history.
-- Discover shows real source collection progress, last successes/errors and remaining setup. **Search remaining ready sources** checks every supported, approved, enabled source that is due, with per-source results and a stop control. Existing collectors inspect one configured page each; this is not an exhaustive website crawl. Keep Discover open while the queue runs.
+- Discover shows real source collection progress, last successes/errors and remaining setup. **Search remaining ready sources** follows configured pagination and job links in resumable batches, with partial coverage, budgets and a stop control. Keep Discover open, or use the command-line worker with `--drain`.
 - Application stages, notes, deletion of imported opportunity records, CSV export with spreadsheet-formula escaping.
 - SQLite persistence by default; optional PostgreSQL connection using the same repository contract and schema.
 - Password-protected sessions when configured; strict mutation-origin checking and read protection on every data endpoint.
-- A disabled-by-default structured-page collector framework with a fixed hostname allowlist, recorded access review, conservative robots handling, validated/pinned public IP, bounded response size, timeout, retry, durable collection interval and an extraction review queue.
+- A disabled-by-default collector framework with per-source host/path rules, access review, per-path robots checks, pinned public IP, bounded responses, timeouts, retry/backoff, durable queues, content-version evidence and review-first extraction. Twenty catalog recipes distinguish inspected pages from unqualified candidates.
 
 ## Important boundaries of this draft
 
 - **The Phase 1 live-collection exit criterion is not yet met.** Synthetic examples and tested imports do not prove live multi-source discovery. Source-specific adapters need permitted access, captured real fixtures and validation.
-- `.eml` imports read the message body; attachments, Gmail/Outlook OAuth and background mailbox sync are not implemented. No mailbox was read during this build.
+- Gmail read-only OAuth and selected-label body collection are implemented; live account acceptance requires your Google client and consent. Attachments and Outlook integration are not implemented. No mailbox was read during this build.
 - No managed scheduling, automatic notifications, calendar sync, national facility dataset, map tiles, biodiversity integration, travel routing, adaptive learning or automatic applications.
 - Calendar entries represent placement dates, not individual rostered shifts. The map is labelled schematic; new facilities without coordinates remain in its list.
 - No tax calculations, credential certification, fellowship equivalence or guarantees of vacancy availability.
@@ -52,14 +52,17 @@ See [the import guide](docs/importing.md) for supported fields. Free-form extrac
 
 Copy `.env.example` to `.env.local` if you need to change settings. Keep that file out of Git.
 
-| Setting             | Purpose                                                             |
-| ------------------- | ------------------------------------------------------------------- |
-| `APP_ORIGIN`        | Exact browser origin; default `http://127.0.0.1:3000`               |
-| `APP_PASSWORD`      | Optional local password; at least 16 characters for a remote origin |
-| `SESSION_SECRET`    | 32+ random characters; required whenever a password is set          |
-| `SQLITE_PATH`       | Default `./data/locum-radar.sqlite`                                 |
-| `DATABASE_URL`      | Optional dedicated PostgreSQL database; overrides SQLite            |
-| `COLLECTOR_ENABLED` | Global collection gate; default false                               |
+| Setting                                  | Purpose                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------- |
+| `APP_ORIGIN`                             | Exact browser origin; default `http://127.0.0.1:3000`               |
+| `APP_PASSWORD`                           | Optional local password; at least 16 characters for a remote origin |
+| `SESSION_SECRET`                         | 32+ random characters; required whenever a password is set          |
+| `SQLITE_PATH`                            | Default `./data/locum-radar.sqlite`                                 |
+| `DATABASE_URL`                           | Optional dedicated PostgreSQL database; overrides SQLite            |
+| `COLLECTOR_ENABLED`                      | Global collection gate; default false                               |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` | Optional Google OAuth client; requires a stable `SESSION_SECRET`    |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`        | Optional Australian job-search API                                  |
+| `BRAVE_SEARCH_API_KEY`                   | Optional recent forum and employer discovery                        |
 
 All local records are under `data/`, which is excluded from Git. There is no browser local-storage copy of your imported advertisements. For a consistent SQLite backup, stop both the app and collectors before copying the database, or use SQLite's online backup tooling; do not copy only the main file while WAL writes are active. Exported CSV contains your job summary, not a complete backup.
 
@@ -74,7 +77,7 @@ Read [deployment and security](docs/deployment.md) before hosting. Runtime datab
 
 ## Verification
 
-Validated locally on 13 October 2026: 73 logic/security/database tests, five production-browser scenarios (desktop and mobile), TypeScript, lint, formatting and a production build. The dependency audit reported no known vulnerabilities at that time. These checks do not validate live collectors or the PostgreSQL backend.
+Acquisition checks include synthetic parser/provider fixtures, label privacy and durable SQLite scan tests, plus local compatibility samples from public boards. Browser tests use a production build. Authenticated Gmail/API operation and PostgreSQL still need live acceptance checks. See the acquisition guide for the exact qualification boundaries.
 
 ```sh
 npm run typecheck
@@ -90,6 +93,7 @@ The browser suite tests the production build, so run `npm run build` first. It u
 ## Design and research
 
 - [Architecture and key decisions](docs/architecture.md)
+- [Acquisition framework, source qualification and Gmail setup](docs/acquisition-plan.md)
 - [Implementation status against the specification](docs/implementation-status.md)
 - [Competitive landscape and features to study](docs/landscape-2026-10-13.md)
 - [Original product specification](docs/product-spec.md)

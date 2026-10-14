@@ -3,6 +3,9 @@ import { useState } from 'react';
 import { Activity, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { Source, Store } from '@/domain/model';
 import { api, Badge, Modal } from './shared';
+import { configForSource } from '@/domain/source-catalog';
+import { collectorConfigSchema } from '@/domain/acquisition';
+import { CollectorSettings, GmailConnection } from './acquisition-settings';
 export function SourcesView({
   store,
   demo,
@@ -16,6 +19,9 @@ export function SourcesView({
 }) {
   const [edit, setEdit] = useState<Source | null>(null),
     [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false),
+    [name, setName] = useState(''),
+    [custom, setCustom] = useState(collectorConfigSchema.parse({ kind: 'feed' }));
   return (
     <>
       <div className="page-intro">
@@ -35,6 +41,41 @@ export function SourcesView({
         </span>
       </div>
       <div className="source-list">
+        {!demo && (
+          <section className="panel">
+            <h2>Build your source coverage</h2>
+            <p>
+              Add the prepared agency, rural, API, Gmail and forum-search recipes. Each shows what
+              has been checked and what still needs setup.
+            </p>
+            <div className="button-row">
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api({ command: 'catalog' });
+                    await reload();
+                    notify(
+                      'Collector recipes added. Review each source’s settings before enabling.',
+                    );
+                  } catch (e) {
+                    notify((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Add / update collector recipes
+              </button>
+              <button className="button secondary" onClick={() => setAdding(true)}>
+                Add a custom source
+              </button>
+            </div>
+          </section>
+        )}
+        {!demo && <GmailConnection />}
         {store.sources.map((source) => {
           const offers = store.offers.filter((o) => o.sourceId === source.id),
             unique = new Set(offers.map((o) => o.opportunityId)).size,
@@ -61,11 +102,12 @@ export function SourcesView({
                 </div>
                 <p className="small muted">
                   {source.type} ·{' '}
-                  {source.method === 'jsonld'
-                    ? 'Structured-page adapter · unverified against live board'
+                  {source.method !== 'manual'
+                    ? `${configForSource(source)?.kind || 'Structured-page'} collector`
                     : 'Manual import'}{' '}
                   · {source.permission === 'approved' ? 'Access recorded' : 'Access not approved'}
                 </p>
+                {source.qualification && <p className="small muted">{source.qualification}</p>}
                 {source.error && <p className="error small">{source.error}</p>}
                 <p className="small">
                   {unique} observed vacancies · {exclusive} unique to this source ·{' '}
@@ -86,13 +128,15 @@ export function SourcesView({
                     <ExternalLink size={17} />
                   </a>
                 )}
-                {!demo && source.method === 'jsonld' && (
+                {!demo && (configForSource(source) || source.method !== 'manual') && (
                   <>
                     <button
                       className="button secondary small"
-                      onClick={() => setEdit({ ...source })}
+                      onClick={() =>
+                        setEdit({ ...source, collector: structuredClone(configForSource(source)) })
+                      }
                     >
-                      Access settings
+                      Collection settings
                     </button>
                     <button
                       className="icon-button"
@@ -174,10 +218,16 @@ export function SourcesView({
             Enable this adapter (24-hour minimum interval)
           </label>
           <p className="small muted">
-            The adapter supports JobPosting structured data only. Unsupported pages are reported as
-            failures; extracted records go to review. The server must also set
+            Scans follow the configured scope and save their progress after each page. Increase
+            limits to continue a capped scan. New records go to review. The server must also set
             COLLECTOR_ENABLED=true.
           </p>
+          {edit.collector && (
+            <CollectorSettings
+              value={edit.collector}
+              change={(collector) => setEdit({ ...edit, collector })}
+            />
+          )}
           <button
             className="button primary"
             disabled={busy}
@@ -190,6 +240,7 @@ export function SourcesView({
                   permission: edit.permission,
                   permissionEvidence: edit.permissionEvidence,
                   enabled: edit.enabled,
+                  collector: edit.collector,
                 });
                 await reload();
                 setEdit(null);
@@ -202,6 +253,56 @@ export function SourcesView({
             }}
           >
             Save access settings
+          </button>
+          <button
+            className="button secondary"
+            disabled={busy || edit.enabled}
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  'Clear this source’s collected evidence and extraction reviews? Imported vacancies and notes will remain.',
+                )
+              )
+                return;
+              try {
+                await api({ command: 'clear-evidence', sourceId: edit.id });
+                await reload();
+                setEdit(null);
+                notify('Collected evidence cleared');
+              } catch (e) {
+                notify((e as Error).message);
+              }
+            }}
+          >
+            Clear collected evidence
+          </button>
+        </Modal>
+      )}
+      {adding && (
+        <Modal title="Add a source" onClose={() => setAdding(false)}>
+          <label>
+            Source name
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <CollectorSettings value={custom} change={setCustom} />
+          <button
+            className="button primary"
+            disabled={busy || !name.trim()}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api({ command: 'add-source', name, collector: custom });
+                await reload();
+                setAdding(false);
+                notify('Source added. Review access and enable it in Collection settings.');
+              } catch (e) {
+                notify((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Add source
           </button>
         </Modal>
       )}

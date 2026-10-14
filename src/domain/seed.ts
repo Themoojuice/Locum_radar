@@ -140,6 +140,7 @@ export function emptyStore(): Store {
     observations: [],
     runs: [],
     reviews: [],
+    documents: [],
   };
 }
 

@@ -90,7 +90,7 @@ test('bulk search attempts every ready source and continues after a failure', as
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
   await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
   await expect(coverage.getByRole('status')).toContainText(
-    '2 of 2 attempted · 1 succeeded · 1 failed',
+    '2 of 2 attempted · 1 succeeded · 0 partial · 1 failed',
   );
   expect(attempted).toEqual(['medrecruit', 'ochre']);
   await expect(coverage.getByText('Fixture failure', { exact: false })).toBeVisible();
@@ -187,7 +187,7 @@ test('bulk search can stop after the active source without starting another', as
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
   await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
   await expect.poll(() => attempted.length).toBe(1);
-  await coverage.getByRole('button', { name: 'Stop after this source' }).click();
+  await coverage.getByRole('button', { name: 'Stop after this batch' }).click();
   release();
   await expect(coverage.getByRole('status')).toContainText('Stopped: 1 of 2 attempted');
   expect(attempted).toEqual(['medrecruit']);
@@ -207,4 +207,78 @@ test('mobile layout stays within the viewport and navigation works', async ({ pa
   await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'My profile & preferences', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Make this radar yours.' })).toBeVisible();
+});
+
+test('Discover drains resumable batches and reports a limited source as partial', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  Object.assign(
+    store.sources.find((s) => s.id === 'medrecruit')!,
+    {
+      enabled: true,
+      permission: 'approved',
+      permissionEvidence: 'Fixture',
+    },
+  );
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: collectionPlan(store, true) }),
+  );
+  let batches = 0;
+  await page.route('**/api/radar', async (route) => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON().command !== 'collect')
+      return route.continue();
+    batches++;
+    await route.fulfill({
+      json: {
+        status: 'partial',
+        remaining: 5,
+        limited: batches === 2,
+        message: batches === 2 ? 'Scan budget reached' : '3 pages checked',
+        count: 1,
+      },
+    });
+  });
+  await page.goto('/');
+  await expect(page.getByText('Opening your private workspace…')).not.toBeVisible();
+  if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
+    await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
+  const coverage = page.getByRole('region', { name: 'Source collection progress' });
+  await coverage.getByRole('button', { name: 'Search remaining ready sources' }).click();
+  await expect(coverage.getByRole('status')).toContainText('0 succeeded · 1 partial');
+  expect(batches).toBe(2);
+});
+
+test('source catalog exposes label-only Gmail setup and saves a custom feed', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Opening your private workspace…')).not.toBeVisible();
+  if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
+    await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Sources', exact: true }).click();
+  await page.getByRole('button', { name: 'Add / update collector recipes' }).click();
+  const gmail = page
+    .locator('.source-card')
+    .filter({ has: page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }) });
+  await gmail.getByRole('button', { name: 'Collection settings' }).click();
+  await expect(page.getByLabel('Import only this Gmail label')).toHaveValue('');
+  await expect(page.getByLabel('Maximum pages / messages per scan')).toHaveValue('200');
+  await page.screenshot({ path: 'test-results/gmail-settings.png' });
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Add a custom source' }).click();
+  await page.getByLabel('Source name', { exact: true }).fill('Fixture feed');
+  await page
+    .getByLabel('Starting URLs (one per line)')
+    .fill('https://example.com/jobs.xml\nhttps://example.com/other.xml');
+  await page.getByLabel('Allowed website hosts (one per line)').fill('example.com');
+  await page.getByRole('button', { name: 'Add source', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  const feed = page
+    .locator('.source-card')
+    .filter({ has: page.getByRole('heading', { name: 'Fixture feed', exact: true }) });
+  await feed.getByRole('button', { name: 'Collection settings' }).click();
+  await expect(page.getByLabel('Starting URLs (one per line)')).toHaveValue(
+    'https://example.com/jobs.xml\nhttps://example.com/other.xml',
+  );
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.screenshot({ path: 'test-results/acquisition-sources.png' });
 });
