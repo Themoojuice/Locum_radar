@@ -17,6 +17,7 @@ import { fromLabelledBlock, type Extraction } from './extraction';
 import type { JsonBlock, SourceAdapter } from './adapters/json-sources';
 import { sourceAdapters } from './adapters/registry';
 import { log, stopRequested } from './progress';
+import { collectionEnabled } from './public-starter';
 export { publicIpv4, robotsAllows } from './acquisition/transport';
 export const allowedSourceUrl = (url: string) =>
   safeUrl(url, [
@@ -87,7 +88,7 @@ export function recordCandidates(
   return count;
 }
 const allowed = (source: Source) =>
-  process.env.COLLECTOR_ENABLED === 'true' &&
+  collectionEnabled() &&
   source.enabled &&
   source.permission === 'approved' &&
   !!source.permissionEvidence.trim() &&

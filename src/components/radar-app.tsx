@@ -47,6 +47,7 @@ import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
 import { SourcesView } from './sources-view';
 import { CollectionProgress } from './collection-progress';
+import { CollectedAdverts } from './collected-adverts';
 
 type View =
   'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
@@ -249,7 +250,9 @@ export function RadarApp() {
         if (!response.ok) throw new Error(value.error);
         if (active) {
           setLive(value);
-          setDemo(value.opportunities.length === 0);
+          setDemo(
+            !value.starterAvailable && value.opportunities.length === 0 && !value.reviews.length,
+          );
           setLoaded(true);
         }
       } catch (e) {
@@ -687,6 +690,12 @@ export function RadarApp() {
                         setDemo(false);
                         navigate('Sources');
                       }}
+                    />
+                  )}
+                  {!demo && (
+                    <CollectedAdverts
+                      store={store}
+                      onReview={(item) => openImport(item.draft || undefined, item.id)}
                     />
                   )}
                   {!demo && store.profile.registration === 'unknown' && (

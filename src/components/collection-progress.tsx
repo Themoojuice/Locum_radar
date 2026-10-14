@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Radio, RefreshCw, ExternalLink } from 'lucide-react';
 import type { CollectionPlan } from '@/domain/collection';
 import type { CollectionRun } from '@/domain/model';
@@ -44,6 +44,7 @@ export function CollectionProgress({
   const [lines, setLines] = useState<LogLine[]>([]);
   const [incomplete, setIncomplete] = useState<string[]>([]);
   const stop = useRef(false),
+    autoStarted = useRef(false),
     running = useRef(false),
     seq = useRef(0),
     logBox = useRef<HTMLOListElement>(null);
@@ -90,12 +91,30 @@ export function CollectionProgress({
       stop.current = true;
     };
   }, []);
-  async function search() {
+  const startPublic = useEffectEvent(() => {
+    void search(true);
+  });
+  useEffect(() => {
+    if (
+      !demo &&
+      plan?.automaticStarter &&
+      !autoStarted.current &&
+      plan.sources.some((s) => s.starter && s.state === 'ready')
+    ) {
+      autoStarted.current = true;
+      startPublic();
+    }
+  }, [demo, plan]);
+  async function search(starterOnly = false) {
     if (running.current || demo) return;
     running.current = true;
     stop.current = false;
     setBusy(true);
-    setMessage('Preparing: hospital directory and inbox…');
+    setMessage(
+      starterOnly
+        ? 'Finding public advertisements — no account or key needed…'
+        : 'Preparing: hospital directory and inbox…',
+    );
     setResults([]);
     setLines([]);
     setIncomplete([]);
@@ -113,9 +132,11 @@ export function CollectionProgress({
       skipped = 0;
     try {
       try {
-        const steps: { step: string; status: string; message: string }[] = await api({
-          command: 'prepare',
-        });
+        const steps: { step: string; status: string; message: string }[] = starterOnly
+          ? []
+          : await api({
+              command: 'prepare',
+            });
         if (Array.isArray(steps))
           setResults(steps.map((s) => ({ name: s.step, status: s.status, message: s.message })));
       } catch (error) {
@@ -124,13 +145,13 @@ export function CollectionProgress({
       const fresh = await getPlan();
       setPlan(fresh);
       const notSearched = fresh.sources
-        .filter((s) => s.state !== 'ready')
+        .filter((s) => s.state !== 'ready' && (!starterOnly || s.starter))
         .map(
           (s) =>
             `${s.name} (${s.state === 'waiting' ? 'refreshed recently' : s.reasons[0] || 'needs setup'})`,
         );
       const queue = fresh.sources
-        .filter((s) => s.state === 'ready')
+        .filter((s) => s.state === 'ready' && (!starterOnly || s.starter))
         .sort((a, b) => Number(!!a.lastSuccess) - Number(!!b.lastSuccess));
       setTotal(queue.length);
       if (!queue.length) {
@@ -153,6 +174,7 @@ export function CollectionProgress({
             setMessage(`${source.name}: ${run.message}`);
             const updated = await getPlan();
             setPlan(updated);
+            await reload();
             resumable = updated.sources.some((s) => s.id === source.id && s.state === 'ready');
           } while (
             !stop.current &&
@@ -236,7 +258,7 @@ export function CollectionProgress({
           <button
             className="button primary small"
             disabled={demo || busy || !plan?.ready}
-            onClick={search}
+            onClick={() => void search()}
           >
             <RefreshCw size={15} />
             {busy ? 'Fetching…' : 'Fetch active vacancies'}
@@ -290,6 +312,10 @@ export function CollectionProgress({
             </p>
           )}
           <p className="small muted">
+            Public starter adverts appear automatically below as they are found. Additional sources
+            are optional connections; the catalog count is not a count of working live feeds.
+          </p>
+          <p className="small muted">
             Fetching first loads the hospital directory and any exported recruiter emails, then
             checks enabled sources that are due. Generic page, feed and Gmail collectors resume
             saved batches. Agency-specific adapters check new listings within their own limits.
@@ -308,6 +334,9 @@ export function CollectionProgress({
                         ? `Last successful scrape: ${when(source.lastSuccess)}`
                         : 'Not successfully scraped yet'}
                       {source.imported ? ` · ${source.imported} imported advertisements` : ''}
+                      {source.adverts
+                        ? ` · ${source.adverts} collected adverts awaiting confirmation`
+                        : ''}
                     </p>
                     {source.lastAttempt && (
                       <p className="small muted">Last attempt: {when(source.lastAttempt)}</p>

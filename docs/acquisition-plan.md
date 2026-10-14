@@ -14,6 +14,12 @@ HTTP collection checks robots rules per path, limits redirects to configured hos
 
 Dedicated Medrecruit, 1Medical, Wavelength and Adzuna adapters are also retained. They use bounded incremental scans and the live log; they do not yet share the generic engine's durable per-page resume queue. A limit, stop or early exit is shown as partial coverage. The AIHW hospital directory and recruiter-specific EML splitters support facility matching and multi-vacancy emails.
 
+## Zero-setup public starter (15 October update)
+
+Ochre is now enabled automatically for fresh/unreviewed workspaces. Personal public collection starts when Discover opens and the source is due; results appear as unconfirmed advertisements directly in Discover. Only explicit locum detail pages with Australian state locations are retained, with advertised rate and placement dates parsed from the job table. Permanent roles and related-job sidebars are excluded. Existing owner disable/deny decisions remain respected. `COLLECTOR_ENABLED=false` stops collection globally. Other catalog entries remain optional and show their own requirements.
+
+The first real workspace scan checked 154 pages, exhausted its configured queue without errors and retained 107 Australian locum adverts. Eight overseas adverts from the initial parser run were excluded from active results, with original evidence retained. This is one source’s public board, not whole-market coverage or a guarantee that every advertised role remains available.
+
 ## Implemented collector families
 
 | Family                        | Functionality now                                                                                                                                 | Remaining qualification or setup                                                                 |
@@ -57,7 +63,7 @@ The research helper `scripts/probe-sources.ts` performs a small public compatibi
 2. In a Google Cloud project, enable the Gmail API and create a Web application OAuth client. Configure the consent screen for your own account. Register the exact redirect URI `http://127.0.0.1:3000/api/gmail/callback` for the default local installation, or your configured HTTPS origin plus `/api/gmail/callback`.
 3. Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and a random `SESSION_SECRET` of at least 32 characters in `.env.local`. Restart the app. Do not send secrets through chat or commit them.
 4. Open Sources → Connect Gmail, complete Google's consent, add the catalog recipe, then choose the custom label in **Gmail recruitment label → Collection settings**. Record access to your own mailbox, enable the source, and choose the lookback window.
-5. Set `COLLECTOR_ENABLED=true` for this installation when ready to run enabled sources. The default remains off. Discover lists any missing setup.
+5. Collection is enabled by default for the public starter; Gmail still requires the connection and source enablement above. An explicit `COLLECTOR_ENABLED=false` disables all sources. Discover lists missing setup.
 
 Google's `gmail.readonly` grant can read the mailbox; it cannot be restricted by Google to one label. Locum Radar enforces the selected label on message listing and rechecks it before parsing each fetched message. It reads label names to populate the selector. It does not send, modify, archive or delete emails. Message bodies that lose the label between listing and fetching are discarded. Attachments are named in a review warning; their contents are not fetched. Removing a label does not retroactively erase evidence already imported.
 

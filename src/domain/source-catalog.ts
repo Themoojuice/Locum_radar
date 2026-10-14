@@ -51,7 +51,7 @@ export const sourceRecipes: SourceRecipe[] = [
       'https://ochrerecruitment.com/medical-jobs',
       ['/job/*'],
       ['/medical-jobs', '/medical-jobs?start=*'],
-      { nextSelector: 'a[href*="start="], a[rel="next"]' },
+      { nextSelector: 'a[href*="start="], a[rel="next"]', maxPages: 200, delayMs: 2000 },
     ),
     qualification: observed,
   },

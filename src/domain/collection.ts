@@ -56,6 +56,10 @@ export function collectionPlan(
         error: source.error,
         lastResult: latestRun?.message ?? null,
         imported: store.listings.filter((l) => l.sourceId === source.id).length,
+        adverts: store.reviews.filter(
+          (r) => r.sourceId === source.id && r.kind === 'extraction' && !r.resolved,
+        ).length,
+        starter: source.id === 'ochre',
         pages: crawl?.pages || 0,
         remaining: crawl?.queue.length || 0,
         partial:
@@ -66,6 +70,7 @@ export function collectionPlan(
       };
     });
   return {
+    automaticStarter: false,
     enabled,
     sources,
     checked: sources.filter((s) => s.lastSuccess).length,

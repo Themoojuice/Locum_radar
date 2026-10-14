@@ -5,6 +5,7 @@ import { previewImport } from './extraction';
 import { commitExtractions, describeTally } from './collectors';
 import { MYHOSPITALS_URL, mergeFacilities, parseMyHospitals } from './adapters/myhospitals';
 import { log, requestStop } from './progress';
+import { collectionEnabled } from './public-starter';
 
 /** Loads the AIHW hospital directory when the workspace has none yet. */
 export async function ensureFacilityDirectory(force = false) {
@@ -55,7 +56,7 @@ export async function importMailFolder(folder: string, days = 45) {
 export async function prepareCollection() {
   requestStop(false);
   const steps: { step: string; status: 'success' | 'failed' | 'skipped'; message: string }[] = [];
-  if (process.env.COLLECTOR_ENABLED === 'true') {
+  if (collectionEnabled()) {
     try {
       const r = await ensureFacilityDirectory();
       steps.push({

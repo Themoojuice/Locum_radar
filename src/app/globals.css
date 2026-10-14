@@ -2420,3 +2420,19 @@ input[type='number'] {
   margin: 6px 0 0;
   padding-left: 18px;
 }
+.collected-adverts {
+  margin: 20px 0;
+  padding: 24px;
+}
+.collected-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.collected-adverts input:not([type='checkbox']) {
+  padding: 10px;
+  max-width: 100%;
+  border: 1px solid #cbd5d1;
+  border-radius: 8px;
+}

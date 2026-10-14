@@ -4,6 +4,58 @@ import { listingInputSchema } from '../../src/domain/model';
 import { emptyStore } from '../../src/domain/seed';
 import { collectionPlan } from '../../src/domain/collection';
 
+test('public starter runs without setup and collected adverts appear without inventing a facility', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  Object.assign(
+    store.sources.find((s) => s.id === 'ochre')!,
+    { enabled: true, permission: 'approved', permissionEvidence: 'Fixture' },
+  );
+  store.reviews.push({
+    id: 'public-fixture',
+    kind: 'extraction',
+    sourceId: 'ochre',
+    opportunityId: null,
+    candidateId: null,
+    resolved: false,
+    reason: 'Facility needs confirmation',
+    rawText: 'Public locum advert',
+    draft: {
+      title: 'Public ED registrar fixture',
+      url: 'https://ochrerecruitment.com/job/fixture',
+      externalId: 'fixture',
+      state: 'NT',
+      startDate: '2027-01-01',
+      endDate: '2027-01-31',
+    },
+  });
+  let attempted = 0;
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: { ...collectionPlan(store, true), automaticStarter: true } }),
+  );
+  await page.route('**/api/radar', (route) => {
+    if (route.request().method() === 'GET')
+      return route.fulfill({ json: { ...store, starterAvailable: true } });
+    if (route.request().postDataJSON().command === 'collect') {
+      attempted++;
+      return route.fulfill({
+        json: { status: 'success', count: 1, message: 'Public fixture found' },
+      });
+    }
+    return route.continue();
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Public ED registrar fixture' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Collected public advertisements' })).toContainText(
+    'Facility not confirmed',
+  );
+  await expect.poll(() => attempted).toBe(1);
+  await expect(
+    page.getByRole('region', { name: 'Source collection progress' }).getByRole('status'),
+  ).toContainText('1 succeeded');
+});
+
 test('example workspace: filter, compare, inspect unknowns and navigate', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));

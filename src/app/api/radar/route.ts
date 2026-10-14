@@ -11,6 +11,7 @@ import { configForSource, sourceRecipes, sourceFromRecipe } from '@/domain/sourc
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
 import { sourceAdapters } from '@/server/adapters/registry';
+import { collectionEnabled } from '@/server/public-starter';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
     const store = await readStore();
     // Evidence versions stay on the server; current review drafts already contain their relevant text.
     return NextResponse.json(
-      { ...store, documents: [] },
+      { ...store, documents: [], starterAvailable: collectionEnabled() },
       {
         headers: { 'Cache-Control': 'private, no-store' },
       },

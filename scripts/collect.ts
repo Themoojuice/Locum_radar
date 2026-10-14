@@ -1,6 +1,7 @@
 import { collectSource } from '../src/server/collectors';
 import { readStore } from '../src/server/database';
 import { collectionPlan } from '../src/domain/collection';
+import { collectionEnabled } from '../src/server/public-starter';
 const sourceId = process.argv.slice(2).find((v) => !v.startsWith('--'));
 const drain = process.argv.includes('--drain');
 const sources = (await readStore()).sources.filter(
@@ -15,7 +16,7 @@ for (const source of sources) {
       run.status !== 'partial' ||
       !run.remaining ||
       run.limited ||
-      !collectionPlan(await readStore(), process.env.COLLECTOR_ENABLED === 'true').sources.some(
+      !collectionPlan(await readStore(), collectionEnabled()).sources.some(
         (s) => s.id === source.id && s.state === 'ready',
       )
     )

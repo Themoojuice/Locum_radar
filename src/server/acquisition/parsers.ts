@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { extractText, extractJobPostings, plainText, type Extraction } from '../extraction';
 import type { CollectorConfig, FrontierItem } from '@/domain/acquisition';
 import { safeUrl } from './transport';
+import { stateFrom, classifyRole } from '../adapters/email-formats';
 export interface Candidate {
   externalId: string;
   url: string | null;
@@ -81,6 +82,47 @@ export function parseWeb(
   detail: boolean,
 ): ParsedPage {
   const $ = load(html);
+  if (sourceId === 'ochre' && detail && $('.job-table').length) {
+    const fields: Record<string, string> = {};
+    $('.job-table tr').each((_, row) => {
+      fields[$(row).find('th').text().replace(':', '').trim().toLowerCase()] = $(row)
+        .find('td')
+        .text()
+        .trim();
+    });
+    if (!/^locum$/i.test(fields.type || '') || !stateFrom(fields.location || ''))
+      return { recognised: true, candidates: [], links: [] };
+    const iso = (value = '') => {
+      const m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!m) return null;
+      const date = `${m[3]}-${m[2]}-${m[1]}`;
+      const time = Date.parse(date);
+      return Number.isFinite(time) && new Date(time).toISOString().startsWith(date) ? date : null;
+    };
+    const title = $('h1').first().text().trim();
+    const role = classifyRole(title);
+    const body = $('.job-content').first().clone();
+    body.find('.job-recuriter, .social-media, form, script, style').remove();
+    const text = [
+      `Rate: ${fields.salary || ''}`,
+      `State: ${stateFrom(fields.location || '') || ''}`,
+      `Start: ${iso(fields.start) || ''}`,
+      `End: ${iso(fields.end) || ''}`,
+      `Specialty: ${role.specialty || ''}`,
+      `Grade: ${role.grade || ''}`,
+      plainText(body.html() || ''),
+    ]
+      .filter((line) => !/^[A-Za-z]+:\s*$/.test(line))
+      .join('\n');
+    const advert = candidate(title, text, fields.id || url, url, sourceId);
+    advert.publishedAt = iso(fields.published);
+    advert.extractions.forEach((e) =>
+      e.issues.unshift(
+        'Public advertisement; facility, exact roster and current availability need confirmation.',
+      ),
+    );
+    return { recognised: true, candidates: [advert], links: [] };
+  }
   if (
     /just a moment|access denied|verify you are human|checking your browser/i.test(
       $('title').text(),

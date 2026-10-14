@@ -24,7 +24,13 @@ Open **http://127.0.0.1:3000**. The server binds only to your computer's loopbac
 
 See [the import guide](docs/importing.md) for supported fields and [the acquisition guide](docs/acquisition-plan.md) for collector recipes, Gmail setup, API options and source qualification. Free-form extraction recognises a limited set of explicit patterns; arbitrary recruiter formats and attachments still require review or transcription.
 
-## Fetching vacancies automatically
+## Public results without setup
+
+Opening your private Discover workspace automatically scans the inspected Ochre public board when due. No API key, Gmail connection or environment file is required. Collected adverts appear progressively in Discover with source links, advertised rates and dates; missing facility and eligibility details remain unknown. The initial source refreshes daily, and an interrupted scan resumes from its saved queue. Keep Discover open while it runs, or use `npm run collect -- ochre --drain`.
+
+The source catalog includes optional connections and unqualified candidates; its count is not a count of working feeds. Explicitly disabling a source is preserved. Set `COLLECTOR_ENABLED=false` to stop all collection.
+
+## Adding more sources
 
 Add these to `.env.local`, then restart the app:
 
@@ -50,7 +56,7 @@ Agency-specific runs can take several minutes and have page/detail limits. Later
 - Application stages, notes, deletion of imported opportunity records, CSV export with spreadsheet-formula escaping.
 - SQLite persistence by default; optional PostgreSQL connection using the same repository contract and schema.
 - Password-protected sessions when configured; strict mutation-origin checking and read protection on every data endpoint.
-- A disabled-by-default collector framework with per-source host/path rules, access review, per-path robots checks, pinned public IP, bounded responses, timeouts, retry/backoff, durable queues, content-version evidence and review-first extraction. Twenty catalog recipes distinguish inspected pages from unqualified candidates.
+- A collector framework with an enabled public starter with per-source host/path rules, access review, per-path robots checks, pinned public IP, bounded responses, timeouts, retry/backoff, durable queues, content-version evidence and review-first extraction. Twenty catalog recipes distinguish inspected pages from unqualified candidates.
 
 ## Important boundaries of this draft
 
@@ -74,7 +80,7 @@ Copy `.env.example` to `.env.local` if you need to change settings. Keep that fi
 | `SESSION_SECRET`                         | 32+ random characters; required whenever a password is set          |
 | `SQLITE_PATH`                            | Default `./data/locum-radar.sqlite`                                 |
 | `DATABASE_URL`                           | Optional dedicated PostgreSQL database; overrides SQLite            |
-| `COLLECTOR_ENABLED`                      | Global collection gate; default false                               |
+| `COLLECTOR_ENABLED`                      | Global collection gate; enabled unless explicitly false             |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` | Optional Google OAuth client; requires a stable `SESSION_SECRET`    |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`        | Optional Australian job-search API                                  |
 | `BRAVE_SEARCH_API_KEY`                   | Optional recent forum and employer discovery                        |
@@ -92,7 +98,7 @@ Read [deployment and security](docs/deployment.md) before hosting. Runtime datab
 
 ## Verification
 
-Validated on 15 October 2026: 134 automated tests, TypeScript, lint, formatting and the production build passed. All seven browser scenarios passed (six in the full run, with the remaining scenario passing after its selector was updated for the new coverage warning). The dependency audit reported no known vulnerabilities.
+Validated on 15 October 2026: 137 automated tests, TypeScript, lint, formatting and the production build passed. All eight browser scenarios passed, including automatic public collection and visible unconfirmed adverts. The dependency audit reported no known vulnerabilities.
 
 Acquisition checks include parser/provider fixtures, label privacy, durable SQLite scans and source-specific adapters, plus local samples from public boards. Browser tests use a production build. Authenticated Gmail/API operation and PostgreSQL still need live acceptance checks. See the acquisition guide for qualification boundaries.
 
