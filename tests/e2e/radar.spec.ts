@@ -31,6 +31,7 @@ test('public starter runs without setup and collected adverts appear without inv
     },
   });
   let attempted = 0;
+  const discovered = store.reviews.pop()!;
   await page.route('**/api/collection', (route) =>
     route.fulfill({ json: { ...collectionPlan(store, true), automaticStarter: true } }),
   );
@@ -39,6 +40,7 @@ test('public starter runs without setup and collected adverts appear without inv
       return route.fulfill({ json: { ...store, starterAvailable: true } });
     if (route.request().postDataJSON().command === 'collect') {
       attempted++;
+      store.reviews.push(discovered);
       return route.fulfill({
         json: { status: 'success', count: 1, message: 'Public fixture found' },
       });
@@ -47,13 +49,62 @@ test('public starter runs without setup and collected adverts appear without inv
   });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Public ED registrar fixture' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Collected public advertisements' })).toContainText(
-    'Facility not confirmed',
-  );
+  await expect(page.getByLabel('Master opportunity pool')).toContainText('Facility not confirmed');
   await expect.poll(() => attempted).toBe(1);
   await expect(
     page.getByRole('region', { name: 'Source collection progress' }).getByRole('status'),
   ).toContainText('1 succeeded');
+});
+
+test('one shared board filters public, Gmail and email adverts without requiring URLs', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  for (const [id, sourceId, title, specialty, amount, basis] of [
+    ['web', 'ochre', 'Public ED fixture', 'Emergency medicine', 150, 'hour'],
+    ['mail', 'email', 'Email psychiatry fixture', 'Psychiatry', 200, 'hour'],
+    ['gmail', 'gmail-label', 'Gmail daily fixture', 'Psychiatry', 1500, 'day'],
+  ] as const)
+    store.reviews.push({
+      id,
+      sourceId,
+      kind: 'extraction',
+      opportunityId: null,
+      candidateId: null,
+      resolved: false,
+      reason: 'Unknown facility',
+      rawText: title,
+      draft: {
+        externalId: id,
+        title,
+        specialty,
+        grade: 'Registrar',
+        state: 'QLD',
+        compensation: { ...demoStore().offers[0].compensation, amount, basis },
+        ...(id === 'web' ? { url: 'https://ochrerecruitment.com/job/fixture' } : {}),
+      },
+    });
+  await page.route('**/api/radar', (route) =>
+    route.fulfill({ json: { ...store, starterAvailable: true } }),
+  );
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: collectionPlan(store, false) }),
+  );
+  await page.goto('/');
+  await expect(page.locator('.job-card')).toHaveCount(3);
+  await expect(page.getByText('FOUND ON PUBLIC JOB BOARDS', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Minimum advertised rate').fill('100');
+  await expect(page.locator('.job-card')).toHaveCount(2);
+  await page.getByLabel('Specialty', { exact: true }).selectOption('Psychiatry');
+  await expect(page.locator('.job-card')).toHaveCount(1);
+  await expect(page.locator('.job-card')).toContainText('Email psychiatry fixture');
+  await page.getByLabel('Pay unit', { exact: true }).selectOption('day');
+  await expect(page.locator('.job-card')).toHaveCount(1);
+  await expect(page.locator('.job-card')).toContainText('Gmail daily fixture');
+  await page.getByLabel('Minimum advertised rate').fill('');
+  await page.getByLabel('Filter by source', { exact: true }).selectOption('email');
+  await expect(page.locator('.job-card')).toHaveCount(1);
+  await expect(page.locator('.job-card')).toContainText('Email psychiatry fixture');
 });
 
 test('example workspace: filter, compare, inspect unknowns and navigate', async ({ page }) => {

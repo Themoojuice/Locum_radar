@@ -7,6 +7,14 @@ export function collectionPlan(
   now = Date.now(),
   setup: Record<string, string[] | string> = {},
 ) {
+  const latestAdverts = new Map<string, Store['reviews'][number]>();
+  for (const review of store.reviews) {
+    if (review.kind === 'extraction')
+      latestAdverts.set(
+        `${review.sourceId}:${review.draft?.externalId || review.draft?.url || review.id}`,
+        review,
+      );
+  }
   const sources = store.sources
     .filter((s) => s.type !== 'manual' && (s.type !== 'email' || s.method === 'collector'))
     .map((source) => {
@@ -56,7 +64,7 @@ export function collectionPlan(
         error: source.error,
         lastResult: latestRun?.message ?? null,
         imported: store.listings.filter((l) => l.sourceId === source.id).length,
-        adverts: store.reviews.filter(
+        adverts: [...latestAdverts.values()].filter(
           (r) => r.sourceId === source.id && r.kind === 'extraction' && !r.resolved,
         ).length,
         starter: source.id === 'ochre',

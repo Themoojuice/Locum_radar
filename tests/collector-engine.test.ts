@@ -125,4 +125,53 @@ describe('durable collector checkpoints', () => {
     expect((await collectSource('ochre')).status).toBe('partial');
     expect((await readStore()).sources[0].lastSuccess).toBeNull();
   });
+  it('reports a cumulative scan total rather than just the last batch', async () => {
+    let index = 0;
+    processor.mockImplementation(async () => result(++index, index < 4));
+    await collectSource('ochre');
+    const last = await collectSource('ochre');
+    expect(last.count).toBe(1);
+    expect(last.scanCount).toBe(4);
+    expect(last.message).toContain('4 adverts added or updated in this scan');
+  });
+  it('reuses unchanged recent details, but fetches changed summaries and aged details', async () => {
+    const url = 'https://ochrerecruitment.com/job/known';
+    const indexPage = (signature: string): ParsedPage => ({
+      recognised: true,
+      candidates: [],
+      links: [{ kind: 'detail', url, signature }],
+    });
+    processor.mockResolvedValueOnce(indexPage('a')).mockResolvedValueOnce({
+      ...result(1, false),
+      candidates: [{ ...result(1, false).candidates[0], url }],
+    });
+    await collectSource('ochre');
+    const reset = () =>
+      transaction((s) => {
+        s.sources[0].lastAttempt = null;
+      });
+    await reset();
+    processor.mockReset();
+    processor.mockResolvedValue(indexPage('a'));
+    const cached = await collectSource('ochre');
+    expect(processor).toHaveBeenCalledTimes(1);
+    expect(cached.scanCount).toBe(0);
+    expect(cached.message).toContain('1 unchanged adverts reused');
+    await reset();
+    processor.mockReset();
+    processor.mockResolvedValueOnce(indexPage('b')).mockResolvedValueOnce({
+      ...result(1, false),
+      candidates: [{ ...result(1, false).candidates[0], url }],
+    });
+    await collectSource('ochre');
+    expect(processor).toHaveBeenCalledTimes(2);
+    await reset();
+    await transaction((s) => {
+      s.sources[0].detailChecks![url].checkedAt = '2000-01-01T00:00:00Z';
+    });
+    processor.mockReset();
+    processor.mockResolvedValueOnce(indexPage('b')).mockResolvedValueOnce(result(1, false));
+    await collectSource('ochre');
+    expect(processor).toHaveBeenCalledTimes(2);
+  });
 });

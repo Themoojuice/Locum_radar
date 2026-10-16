@@ -47,7 +47,8 @@ import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
 import { SourcesView } from './sources-view';
 import { CollectionProgress } from './collection-progress';
-import { CollectedAdverts } from './collected-adverts';
+import { PendingJobCard } from './collected-adverts';
+import { jobPool, matchesPool, poolRate } from '@/domain/job-pool';
 
 type View =
   'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
@@ -203,10 +204,14 @@ export function RadarApp() {
     [search, setSearch] = useState(''),
     [specialty, setSpecialty] = useState(''),
     [state, setState] = useState(''),
-    [eligibility, setEligibility] = useState('suitable'),
-    [year, setYear] = useState('2027'),
+    [eligibility, setEligibility] = useState('all'),
+    [year, setYear] = useState(''),
     [travel, setTravel] = useState(false),
     [grade, setGrade] = useState('');
+  const [sourceFilter, setSourceFilter] = useState(''),
+    [minimumPay, setMinimumPay] = useState(''),
+    [payUnit, setPayUnit] = useState('hour'),
+    [sort, setSort] = useState('recent');
   const [display, setDisplay] = useState<'cards' | 'map'>('cards'),
     [selected, setSelected] = useState<string[]>([]),
     [detail, setDetail] = useState<string | null>(null),
@@ -283,50 +288,46 @@ export function RadarApp() {
   const shortlist = jobs.filter(
     (j) => j.action && !['Discovered', 'Dismissed', 'Declined'].includes(j.action.stage),
   );
+  const pool = useMemo(() => (store ? jobPool(store, jobs) : []), [store, jobs]);
+  const activeReviews = (store?.reviews || []).filter(
+    (r) =>
+      !r.resolved && (r.kind !== 'extraction' || pool.some((item) => item.review?.id === r.id)),
+  );
   const pendingReviews =
-    (store?.reviews.filter((r) => !r.resolved).length || 0) +
-    jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
-  const filtered = jobs.filter((j) => {
-    const o = j.opportunity;
-    if (view === 'Shortlist' && !shortlist.includes(j)) return false;
-    if (view !== 'Shortlist' && ['Dismissed', 'Declined'].includes(j.action?.stage || ''))
-      return false;
-    if (
-      search &&
-      !`${j.facility.name} ${j.facility.town} ${o.title} ${o.grade}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    )
-      return false;
-    if (
-      (specialty && o.specialty !== specialty) ||
-      (state && j.facility.state !== state) ||
-      (grade && o.grade !== grade)
-    )
-      return false;
-    if (year && (o.startDate > `${year}-12-31` || o.endDate < `${year}-01-01`)) return false;
-    if (
-      travel &&
-      !j.activeOffers.some((o) => o.flights === 'included' && o.accommodation === 'included')
-    )
-      return false;
-    if (view !== 'Shortlist' && eligibility === 'suitable' && !j.rankable) return false;
-    if (
-      view !== 'Shortlist' &&
-      eligibility !== 'all' &&
-      eligibility !== 'suitable' &&
-      j.eligibility.status !== eligibility
-    )
-      return false;
-    return true;
-  });
+    activeReviews.length + jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
+  const visiblePool = pool
+    .filter((item) => {
+      if (view === 'Shortlist' && (!item.job || !shortlist.includes(item.job))) return false;
+      if (view !== 'Shortlist' && ['Dismissed', 'Declined'].includes(item.job?.action?.stage || ''))
+        return false;
+      return matchesPool(item, {
+        search,
+        specialty,
+        state,
+        grade,
+        year,
+        source: sourceFilter,
+        minimumPay: Number(minimumPay) || 0,
+        payUnit,
+        suitability: view === 'Shortlist' ? 'all' : eligibility,
+        travel,
+      });
+    })
+    .sort((a, b) =>
+      sort === 'pay'
+        ? poolRate(b, payUnit, sourceFilter) - poolRate(a, payUnit, sourceFilter)
+        : sort === 'match'
+          ? (b.job?.ranking.score ?? -1) - (a.job?.ranking.score ?? -1)
+          : b.updatedAt.localeCompare(a.updatedAt),
+    );
+  const filtered = visiblePool.flatMap((item) => (item.job ? [item.job] : []));
   function changeMode(value: boolean) {
     setDemo(value);
     setWeights(null);
     setSelected([]);
     setDetail(null);
     setView('Discover');
-    setEligibility('suitable');
+    setEligibility('all');
   }
   function navigate(name: View) {
     setView(name);
@@ -371,30 +372,32 @@ export function RadarApp() {
   function exportCsv() {
     const rows = [
       [
-        'Hospital',
+        'Title',
+        'Facility',
         'State',
         'Specialty',
         'Grade',
         'Start',
         'End',
+        'Sources',
+        'Advertised rates',
         'Eligibility',
-        'Preference score',
-        'Scoring evidence percent',
         'Comparable hourly AUD',
         'Stage',
       ],
-      ...jobs.map((j) => [
-        j.facility.name,
-        j.facility.state,
-        j.opportunity.specialty,
-        j.opportunity.grade,
-        j.opportunity.startDate,
-        j.opportunity.endDate,
-        j.eligibility.status,
-        j.ranking.score ?? '',
-        j.ranking.evidence,
-        j.ranking.bestHourly ?? '',
-        j.action?.stage || 'Discovered',
+      ...visiblePool.map((item) => [
+        item.title,
+        item.job?.facility.name || item.review?.draft?.facilityName || '',
+        item.state,
+        item.specialty,
+        item.grade,
+        item.startDate,
+        item.endDate,
+        item.sources.map((id) => store?.sources.find((s) => s.id === id)?.name || id).join('; '),
+        item.pay.map(rateLabel).join('; '),
+        item.job?.eligibility.status || 'Needs verification',
+        item.job?.ranking.bestHourly ?? '',
+        item.job?.action?.stage || 'Discovered',
       ]),
     ];
     const csv = rows
@@ -578,7 +581,7 @@ export function RadarApp() {
               <span>
                 {demo
                   ? 'Fictional vacancies and a sample doctor profile. No live jobs or credentials are implied.'
-                  : 'Your records stay in your configured database. Imports are reviewed before they reach your feed.'}
+                  : 'Your records stay in your configured database. New adverts appear immediately; review confirms missing details.'}
               </span>
             </div>
             <button onClick={() => changeMode(!demo)}>
@@ -638,8 +641,8 @@ export function RadarApp() {
                         <Compass size={17} />
                       </span>
                       <strong>
-                        {jobs.filter((j) => j.eligibility.status !== 'Expired/unavailable').length}
-                        <small>{demo ? 'illustrative examples' : 'from your imports'}</small>
+                        {pool.length}
+                        <small>{demo ? 'illustrative examples' : 'across all sources'}</small>
                       </strong>
                       <p>{store.listings.length} advertisements, reconciled</p>
                     </div>
@@ -660,7 +663,12 @@ export function RadarApp() {
                         <ShieldQuestion size={17} />
                       </span>
                       <strong>
-                        {jobs.filter((j) => j.eligibility.status === 'Needs verification').length}
+                        {
+                          pool.filter(
+                            (item) =>
+                              !item.job || item.job.eligibility.status === 'Needs verification',
+                          ).length
+                        }
                         <small>need a closer look</small>
                       </strong>
                       <button className="text-button" onClick={() => navigate('Review queue')}>
@@ -684,18 +692,13 @@ export function RadarApp() {
                   </div>
                   {view === 'Discover' && (
                     <CollectionProgress
+                      knownCount={pool.length}
                       demo={demo}
                       reload={reload}
                       onSettings={() => {
                         setDemo(false);
                         navigate('Sources');
                       }}
-                    />
-                  )}
-                  {!demo && (
-                    <CollectedAdverts
-                      store={store}
-                      onReview={(item) => openImport(item.draft || undefined, item.id)}
                     />
                   )}
                   {!demo && store.profile.registration === 'unknown' && (
@@ -730,6 +733,7 @@ export function RadarApp() {
                           <label className="compact-select">
                             <span className="sr-only">Specialty</span>
                             <select
+                              aria-label="Specialty"
                               value={specialty}
                               onChange={(e) => setSpecialty(e.target.value)}
                             >
@@ -764,6 +768,61 @@ export function RadarApp() {
                             Filters
                           </button>
                         </div>
+                        <div className="filter-row">
+                          <label className="compact-select">
+                            <span className="sr-only">Source</span>
+                            <select
+                              aria-label="Filter by source"
+                              value={sourceFilter}
+                              onChange={(e) => setSourceFilter(e.target.value)}
+                            >
+                              <option value="">All sources, including email</option>
+                              {store.sources.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="compact-select">
+                            <span className="sr-only">Pay unit</span>
+                            <select
+                              aria-label="Pay unit"
+                              value={payUnit}
+                              onChange={(e) => setPayUnit(e.target.value)}
+                            >
+                              <option value="hour">AUD per hour</option>
+                              <option value="day">AUD per day</option>
+                              <option value="shift">AUD per shift</option>
+                              <option value="placement">AUD per placement</option>
+                            </select>
+                          </label>
+                          <input
+                            aria-label="Minimum advertised rate"
+                            type="number"
+                            min="0"
+                            placeholder="Minimum rate"
+                            value={minimumPay}
+                            onChange={(e) => setMinimumPay(e.target.value)}
+                          />
+                          <label className="compact-select">
+                            <span className="sr-only">Sort opportunities</span>
+                            <select
+                              aria-label="Sort opportunities"
+                              value={sort}
+                              onChange={(e) => setSort(e.target.value)}
+                            >
+                              <option value="recent">Recently found or updated</option>
+                              <option value="pay">Highest rate in selected unit</option>
+                              <option value="match">Best personal match</option>
+                            </select>
+                          </label>
+                        </div>
+                        <p className="small muted">
+                          One pool from public boards, connected email and imports. Unknown details
+                          stay visible; a minimum rate filters only known AUD rates in the selected
+                          unit.
+                        </p>
                         {extraFilters && (
                           <div className="extra-filters">
                             <label>
@@ -812,8 +871,10 @@ export function RadarApp() {
                                 setState('');
                                 setGrade('');
                                 setTravel(false);
-                                setYear('2027');
-                                setEligibility('suitable');
+                                setYear('');
+                                setMinimumPay('');
+                                setSourceFilter('');
+                                setEligibility('all');
                               }}
                             >
                               Reset filters
@@ -821,10 +882,10 @@ export function RadarApp() {
                           </div>
                         )}
                       </section>
-                      <div className="results-toolbar">
+                      <div className="results-toolbar" id="job-board">
                         <div>
                           <strong>
-                            {filtered.length}{' '}
+                            {visiblePool.length}{' '}
                             {view === 'Shortlist' ? 'saved opportunities' : 'opportunities'}
                           </strong>
                           <span>
@@ -852,43 +913,73 @@ export function RadarApp() {
                         </div>
                       </div>
                       {display === 'map' ? (
-                        <GeographicExplorer jobs={filtered} store={store} onSelect={setDetail} />
-                      ) : filtered.length ? (
-                        <div className="job-grid">
-                          {filtered.map((job) => (
-                            <OpportunityCard
-                              key={job.opportunity.id}
-                              job={job}
-                              selected={selected.includes(job.opportunity.id)}
-                              onSelect={() => setDetail(job.opportunity.id)}
-                              onCompare={() => compare(job.opportunity.id)}
-                              onSave={() =>
-                                action(
-                                  job.opportunity.id,
-                                  job.action?.stage &&
-                                    !['Discovered', 'Dismissed', 'Declined'].includes(
-                                      job.action.stage,
-                                    )
-                                    ? 'Discovered'
-                                    : 'Saved',
-                                  job.action?.notes || '',
-                                ).catch((e) => setToast(e.message))
-                              }
-                            />
-                          ))}
+                        <>
+                          <p className="small muted">
+                            {visiblePool.length - filtered.length} adverts need confirmed facilities
+                            before they can appear on the map. All remain in card view.
+                          </p>
+                          <GeographicExplorer jobs={filtered} store={store} onSelect={setDetail} />
+                        </>
+                      ) : visiblePool.length ? (
+                        <div className="job-grid" aria-label="Master opportunity pool">
+                          {visiblePool.map((item) => {
+                            const job = item.job;
+                            return job ? (
+                              <div key={item.id}>
+                                {item.review && (
+                                  <button
+                                    className="text-button small"
+                                    onClick={() =>
+                                      openImport(item.review!.draft || undefined, item.review!.id)
+                                    }
+                                  >
+                                    Updated source details — review
+                                  </button>
+                                )}
+                                <OpportunityCard
+                                  key={job.opportunity.id}
+                                  job={job}
+                                  selected={selected.includes(job.opportunity.id)}
+                                  onSelect={() => setDetail(job.opportunity.id)}
+                                  onCompare={() => compare(job.opportunity.id)}
+                                  onSave={() =>
+                                    action(
+                                      job.opportunity.id,
+                                      job.action?.stage &&
+                                        !['Discovered', 'Dismissed', 'Declined'].includes(
+                                          job.action.stage,
+                                        )
+                                        ? 'Discovered'
+                                        : 'Saved',
+                                      job.action?.notes || '',
+                                    ).catch((e) => setToast(e.message))
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <PendingJobCard
+                                key={item.id}
+                                item={item.review!}
+                                store={store}
+                                onReview={() =>
+                                  openImport(item.review!.draft || undefined, item.review!.id)
+                                }
+                              />
+                            );
+                          })}
                         </div>
                       ) : (
                         <Empty
                           title={
-                            !store.opportunities.length
-                              ? 'Your next chapter starts here.'
+                            !pool.length
+                              ? 'Finding your first opportunities.'
                               : 'No opportunities in this view.'
                           }
                         >
                           <p>
-                            {!store.opportunities.length
-                              ? 'Start with a recruiter email or a job advertisement. Review the details once, then compare everything in one place.'
-                              : 'Try broader filters, or check the verification queue for jobs with missing requirements.'}
+                            {!pool.length
+                              ? 'Connected sources add roles here as they are found. You can also import a recruiter email or advertisement.'
+                              : 'Try broader filters. Roles with missing details are included unless a filter requires those details.'}
                           </p>
                           <button
                             className="button primary"
@@ -1053,78 +1144,74 @@ export function RadarApp() {
                       resolved.
                     </p>
                   </div>
-                  {store.reviews
-                    .filter((r) => !r.resolved)
-                    .map((r) => (
-                      <article key={r.id} className="panel review-card">
-                        <Badge tone="amber">{r.kind}</Badge>
-                        <h3>
-                          {r.draft?.title ||
-                            jobs.find((j) => j.opportunity.id === r.opportunityId)?.opportunity
-                              .title ||
-                            'Possible duplicate vacancy'}
-                        </h3>
-                        <p>{r.reason}</p>
-                        <div className="button-row">
-                          {r.kind === 'extraction' ? (
-                            <button
-                              className="button primary small"
-                              onClick={() => openImport(r.draft || undefined, r.id)}
-                            >
-                              Review extracted record
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                className="button secondary small"
-                                onClick={() => setDetail(r.opportunityId)}
-                              >
-                                Inspect opportunity
-                              </button>
-                              <button
-                                className="button secondary small"
-                                onClick={() => setDetail(r.candidateId)}
-                              >
-                                Inspect possible match
-                              </button>
-                              <button
-                                className="button secondary small"
-                                onClick={async () => {
-                                  try {
-                                    await api({
-                                      command: 'merge',
-                                      from: r.opportunityId,
-                                      to: r.candidateId,
-                                    });
-                                    await reload();
-                                    setToast('Vacancies merged; recruiter offers retained.');
-                                  } catch (e) {
-                                    setToast((e as Error).message);
-                                  }
-                                }}
-                              >
-                                Confirm same vacancy
-                              </button>
-                            </>
-                          )}
+                  {activeReviews.map((r) => (
+                    <article key={r.id} className="panel review-card">
+                      <Badge tone="amber">{r.kind}</Badge>
+                      <h3>
+                        {r.draft?.title ||
+                          jobs.find((j) => j.opportunity.id === r.opportunityId)?.opportunity
+                            .title ||
+                          'Possible duplicate vacancy'}
+                      </h3>
+                      <p>{r.reason}</p>
+                      <div className="button-row">
+                        {r.kind === 'extraction' ? (
                           <button
-                            className="text-button"
-                            onClick={async () => {
-                              try {
-                                await api({ command: 'resolve', reviewId: r.id });
-                                await reload();
-                              } catch (e) {
-                                setToast((e as Error).message);
-                              }
-                            }}
+                            className="button primary small"
+                            onClick={() => openImport(r.draft || undefined, r.id)}
                           >
-                            {r.kind === 'possible duplicate'
-                              ? 'Keep separate'
-                              : 'Dismiss extraction'}
+                            Review extracted record
                           </button>
-                        </div>
-                      </article>
-                    ))}
+                        ) : (
+                          <>
+                            <button
+                              className="button secondary small"
+                              onClick={() => setDetail(r.opportunityId)}
+                            >
+                              Inspect opportunity
+                            </button>
+                            <button
+                              className="button secondary small"
+                              onClick={() => setDetail(r.candidateId)}
+                            >
+                              Inspect possible match
+                            </button>
+                            <button
+                              className="button secondary small"
+                              onClick={async () => {
+                                try {
+                                  await api({
+                                    command: 'merge',
+                                    from: r.opportunityId,
+                                    to: r.candidateId,
+                                  });
+                                  await reload();
+                                  setToast('Vacancies merged; recruiter offers retained.');
+                                } catch (e) {
+                                  setToast((e as Error).message);
+                                }
+                              }}
+                            >
+                              Confirm same vacancy
+                            </button>
+                          </>
+                        )}
+                        <button
+                          className="text-button"
+                          onClick={async () => {
+                            try {
+                              await api({ command: 'resolve', reviewId: r.id });
+                              await reload();
+                            } catch (e) {
+                              setToast((e as Error).message);
+                            }
+                          }}
+                        >
+                          {r.kind === 'possible duplicate' ? 'Keep separate' : 'Dismiss extraction'}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                   {jobs
                     .filter((j) => j.eligibility.status === 'Needs verification')
                     .map((j) => (

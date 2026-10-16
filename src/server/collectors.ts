@@ -69,7 +69,17 @@ export function recordCandidates(
       kind: item.kind,
     });
     for (const [index, extracted] of item.extractions.entries()) {
+      for (const previous of store.reviews) {
+        if (
+          previous.sourceId === sourceId &&
+          previous.kind === 'extraction' &&
+          previous.draft?.externalId &&
+          previous.draft.externalId === extracted.draft.externalId
+        )
+          previous.resolved = true;
+      }
       store.reviews.push({
+        observedAt,
         id: 'acquire-' + id + '-' + index,
         kind: 'extraction',
         sourceId,
@@ -100,6 +110,7 @@ export function queueExtractions(s: Store, sourceId: string, results: Extraction
     const id = `extract-${fingerprint({ source: sourceId, raw: result.draft.rawText })}`;
     if (s.reviews.some((r) => r.id === id)) continue;
     s.reviews.push({
+      observedAt: new Date().toISOString(),
       id,
       kind: 'extraction',
       opportunityId: null,
@@ -425,6 +436,8 @@ export async function collectSource(sourceId: string) {
         seen: [],
         pages: 0,
         records: 0,
+        newRecords: 0,
+        reused: 0,
         errors: [],
         limited: false,
         complete: false,
@@ -485,6 +498,7 @@ export async function collectSource(sourceId: string) {
             room = Math.max(0, config.maxRecords - next.records);
           const kept = result.candidates.slice(offset, offset + room);
           count = recordCandidates(s, sourceId, kept, new Date().toISOString());
+          next.newRecords = (next.newRecords || 0) + count;
           next.records += kept.length;
           if (offset + kept.length < result.candidates.length) {
             pageFinished = false;
@@ -494,6 +508,20 @@ export async function collectSource(sourceId: string) {
           const known = new Set([...next.seen, ...next.queue.map((v) => v.url)]);
           for (const link of result.links) {
             const url = link.url.startsWith('/') ? link.url : canonicalUrl(link.url);
+            const cached = source.detailChecks?.[url];
+            if (
+              !known.has(url) &&
+              link.kind === 'detail' &&
+              link.signature &&
+              cached?.signature === link.signature &&
+              Date.now() - Date.parse(cached.checkedAt) < 7 * 86400000 &&
+              s.documents.some((d) => d.sourceId === sourceId && d.url === url)
+            ) {
+              known.add(url);
+              next.seen.push(url);
+              next.reused = (next.reused || 0) + 1;
+              continue;
+            }
             if (!known.has(url) && next.queue.length < 5000) {
               known.add(url);
               next.queue.push({ ...link, url });
@@ -502,6 +530,15 @@ export async function collectSource(sourceId: string) {
           }
         }
         if (pageFinished) {
+          if (!problem && item.kind === 'detail' && item.signature) {
+            source.detailChecks ??= {};
+            source.detailChecks[item.url] = {
+              signature: item.signature,
+              checkedAt: new Date().toISOString(),
+            };
+            if (Object.keys(source.detailChecks).length > 2000)
+              delete source.detailChecks[Object.keys(source.detailChecks)[0]];
+          }
           next.queue.shift();
           next.seen.push(item.url);
           next.pages++;
@@ -523,13 +560,14 @@ export async function collectSource(sourceId: string) {
     record.pages = crawl.pages;
     record.remaining = crawl.queue.length;
     record.limited = crawl.limited;
+    record.scanCount = crawl.newRecords || 0;
     record.status =
       crawl.complete && !crawl.errors.length
         ? 'success'
         : crawl.complete && crawl.errors.length && !crawl.records
           ? 'failed'
           : 'partial';
-    record.message = `${crawl.pages} pages/messages checked; ${record.count} new review records; ${crawl.queue.length} queued.${crawl.limited ? ' Scan budget reached; coverage is partial.' : ''}${crawl.errors.length ? ' Issues: ' + [...new Set(crawl.errors)].slice(0, 4).join(' · ') : ''}`;
+    record.message = `${crawl.pages} pages/messages checked; ${record.scanCount} adverts added or updated in this scan (${record.count} this batch); ${crawl.reused || 0} unchanged adverts reused; ${crawl.queue.length} queued.${crawl.limited ? ' Scan budget reached; coverage is partial.' : ''}${crawl.errors.length ? ' Issues: ' + [...new Set(crawl.errors)].slice(0, 4).join(' · ') : ''}`;
     log(sourceId, record.message, record.status === 'success' ? 'info' : 'warn');
   } catch (error) {
     record.status = 'failed';

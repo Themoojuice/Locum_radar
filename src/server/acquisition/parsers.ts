@@ -175,6 +175,30 @@ export function parseWeb(
       }
     });
   }
+  if (sourceId === 'ochre' && !detail) {
+    const summaries = new Map<string, { allowed: boolean; signature: string }>();
+    $('.job-summary').each((_, element) => {
+      const row = $(element),
+        href = row.find('.job-summary__title a').attr('href');
+      if (!href) return;
+      try {
+        const metaNode = row.find('.job-summary__meta').clone();
+        metaNode.find('span').replaceWith('|');
+        const meta = metaNode.text();
+        summaries.set(canonicalUrl(href, url), {
+          allowed: /^\s*Locum\b/i.test(meta) && !!stateFrom(meta.split('|')[1] || ''),
+          signature: hash('ochre-summary-v1:' + row.text().replace(/\s+/g, ' ').trim()),
+        });
+      } catch {
+        /* Invalid source link is ignored. */
+      }
+    });
+    for (let i = links.length - 1; i >= 0; i--) {
+      const summary = summaries.get(links[i].url);
+      if (summary && !summary.allowed) links.splice(i, 1);
+      else if (summary) links[i].signature = summary.signature;
+    }
+  }
   const structured = extractJobPostings(html, sourceId, url);
   let candidates: Candidate[] = [];
   if (detail || !links.some((l) => l.kind === 'detail')) {
@@ -219,7 +243,9 @@ export function parseWeb(
   return {
     links: detail ? [] : links,
     candidates,
-    recognised: (!detail && links.length > 0) || candidates.length > 0,
+    recognised:
+      (!detail && (links.length > 0 || (sourceId === 'ochre' && $('.job-summary').length > 0))) ||
+      candidates.length > 0,
     warnings:
       dynamicNext && !links.some((l) => l.kind === 'listing')
         ? [

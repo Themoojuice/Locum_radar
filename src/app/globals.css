@@ -675,6 +675,11 @@ input[type='number'] {
   align-items: center;
   padding: 7px 8px;
 }
+.filter-row > input {
+  flex: 0 1 150px;
+  width: 150px;
+  min-width: 100px;
+}
 .compact-select {
   flex: 1;
   margin: 0;

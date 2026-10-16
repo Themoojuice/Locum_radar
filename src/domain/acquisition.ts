@@ -29,6 +29,7 @@ export interface FrontierItem {
   kind: 'listing' | 'detail' | 'feed' | 'sitemap' | 'api' | 'message';
   offset?: number;
   pageHash?: string;
+  signature?: string;
 }
 export interface CrawlState {
   id: string;
@@ -37,6 +38,8 @@ export interface CrawlState {
   seen: string[];
   pages: number;
   records: number;
+  newRecords?: number;
+  reused?: number;
   errors: string[];
   limited: boolean;
   complete: boolean;

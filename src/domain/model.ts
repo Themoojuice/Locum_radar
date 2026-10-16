@@ -157,6 +157,7 @@ export interface Source {
   collector?: import('./acquisition').CollectorConfig;
   crawl?: import('./acquisition').CrawlState;
   qualification?: string;
+  detailChecks?: Record<string, { signature: string; checkedAt: string }>;
   permission: 'unreviewed' | 'approved' | 'denied';
   permissionEvidence: string;
   enabled: boolean;
@@ -223,9 +224,11 @@ export interface CollectionRun {
   remaining?: number;
   limited?: boolean;
   count: number;
+  scanCount?: number;
   message: string;
 }
 export interface ReviewItem {
+  observedAt?: string;
   id: string;
   kind: 'possible duplicate' | 'extraction';
   opportunityId: string | null;

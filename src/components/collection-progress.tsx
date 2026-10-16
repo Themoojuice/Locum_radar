@@ -30,10 +30,12 @@ export function CollectionProgress({
   demo,
   reload,
   onSettings,
+  knownCount,
 }: {
   demo: boolean;
   reload: () => Promise<void>;
   onSettings: () => void;
+  knownCount: number;
 }) {
   const [plan, setPlan] = useState<CollectionPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -77,6 +79,9 @@ export function CollectionProgress({
   useEffect(() => {
     if (logBox.current) logBox.current.scrollTop = logBox.current.scrollHeight;
   }, [lines]);
+  const refreshPool = useEffectEvent(async () => {
+    if (!demo && !running.current) await reload();
+  });
   useEffect(() => {
     let active = true;
     getPlan()
@@ -86,7 +91,19 @@ export function CollectionProgress({
       .catch((error) => {
         if (active) setMessage(error.message);
       });
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      void getPlan()
+        .then((value) => {
+          if (active) {
+            setPlan(value);
+            void refreshPool();
+          }
+        })
+        .catch(() => {});
+    }, 60000);
     return () => {
+      clearInterval(timer);
       active = false;
       stop.current = true;
     };
@@ -95,16 +112,18 @@ export function CollectionProgress({
     void search(true);
   });
   useEffect(() => {
+    if (!busy && plan && !plan.sources.some((s) => s.state === 'ready'))
+      autoStarted.current = false;
     if (
       !demo &&
       plan?.automaticStarter &&
       !autoStarted.current &&
-      plan.sources.some((s) => s.starter && s.state === 'ready')
+      plan.sources.some((s) => s.state === 'ready')
     ) {
       autoStarted.current = true;
       startPublic();
     }
-  }, [demo, plan]);
+  }, [demo, plan, busy]);
   async function search(starterOnly = false) {
     if (running.current || demo) return;
     running.current = true;
@@ -112,7 +131,7 @@ export function CollectionProgress({
     setBusy(true);
     setMessage(
       starterOnly
-        ? 'Finding public advertisements — no account or key needed…'
+        ? 'Updating the job board from connected sources…'
         : 'Preparing: hospital directory and inbox…',
     );
     setResults([]);
@@ -151,7 +170,7 @@ export function CollectionProgress({
             `${s.name} (${s.state === 'waiting' ? 'refreshed recently' : s.reasons[0] || 'needs setup'})`,
         );
       const queue = fresh.sources
-        .filter((s) => s.state === 'ready' && (!starterOnly || s.starter))
+        .filter((s) => s.state === 'ready')
         .sort((a, b) => Number(!!a.lastSuccess) - Number(!!b.lastSuccess));
       setTotal(queue.length);
       if (!queue.length) {
@@ -212,7 +231,7 @@ export function CollectionProgress({
         ...notSearched,
       ]);
       setMessage(
-        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${partial} partial · ${failed} failed · ${skipped} skipped. Check the feed and Review queue for new records.`,
+        `${stop.current ? 'Stopped' : 'Search finished'}: ${processed} of ${queue.length} attempted · ${succeeded} succeeded · ${partial} partial · ${failed} failed · ${skipped} skipped. Results are in the job board below; filters may hide some roles.`,
       );
       setPlan(await getPlan());
       await reload();
@@ -238,6 +257,9 @@ export function CollectionProgress({
           </p>
         </div>
         <div className="button-row">
+          <a className="button secondary small" href="#job-board">
+            View {knownCount} roles
+          </a>
           <button
             className="button secondary small"
             disabled={busy}
@@ -312,8 +334,8 @@ export function CollectionProgress({
             </p>
           )}
           <p className="small muted">
-            Public starter adverts appear automatically below as they are found. Additional sources
-            are optional connections; the catalog count is not a count of working live feeds.
+            All connected sources feed the same job board below, including email. New results appear
+            as each batch completes. Enabled sources refresh when due while Discover is open.
           </p>
           <p className="small muted">
             Fetching first loads the hospital directory and any exported recruiter emails, then
