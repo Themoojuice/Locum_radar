@@ -255,6 +255,14 @@ export function RadarApp() {
         if (!response.ok) throw new Error(value.error);
         if (active) {
           setLive(value);
+          if (new URLSearchParams(window.location.search).has('gmail')) {
+            setView('Sources');
+            setToast(
+              new URLSearchParams(window.location.search).get('gmail') === 'connected'
+                ? 'Gmail connected. Choose your emails and press Import from Gmail.'
+                : 'Google connection was not completed. Check the setup details and try again.',
+            );
+          }
           setDemo(
             !value.starterAvailable && value.opportunities.length === 0 && !value.reviews.length,
           );
@@ -628,6 +636,11 @@ export function RadarApp() {
                         <Download size={16} />
                         Export
                       </button>
+                      {!demo && (
+                        <button className="button secondary" onClick={() => navigate('Sources')}>
+                          Import from Gmail
+                        </button>
+                      )}
                       <button className="button primary" onClick={() => openImport()}>
                         <Plus size={17} />
                         Import opportunities

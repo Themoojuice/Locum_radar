@@ -2,7 +2,7 @@
 
 A private workspace for finding and comparing Australian medical locum opportunities, with 2027 planning as the initial focus.
 
-**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Resumable acquisition supports public pages, feeds, sitemaps, Adzuna, recent web/forum leads and a selected Gmail label. Source qualification and missing setup are explicit. No email account, paid API or hosted service is connected by default.
+**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Resumable acquisition supports public pages, feeds, sitemaps, Adzuna, recent web/forum leads and Gmail label or explicit mailbox searches. Source qualification and missing setup are explicit. No email account, paid API or hosted service is connected by default.
 
 ![The fictional example workspace](docs/screenshots/radar-desktop.png)
 
@@ -123,3 +123,11 @@ The browser suite tests the production build, so run `npm run build` first. It u
 - [Original product specification](docs/product-spec.md)
 
 No commercial licensing assumptions or third-party redistribution rights are inferred from this project's personal-use purpose. Source access is recorded individually; manual imports remain available independently of collectors.
+
+## Guided source setup
+
+Use **Import from Gmail** on Discover or Sources. If Google credentials are missing, the app shows direct Google Cloud links, the exact callback URL, and client-ID/secret fields. Saving needs no environment-file edits or restart. Google app registration and account consent remain required. Existing environment credentials still work. Locally saved provider credentials are encrypted under `data/secrets`; keep this private directory with database backups and do not share it.
+
+After connecting, choose **Search all mail for possible locum offers** or **Only my selected recruitment label**. Search mode is explicitly selected; older label-only configurations remain label-only. All-history import has no date cutoff; otherwise choose up to 365 days. The editable Gmail query can miss unfamiliar wording and can include non-job messages. Email bodies are imported progressively into Discover; attachment contents still require separate review. Keep the page open; Pause stops after the current batch and the next import resumes it. Scan limits are displayed, and repeated imports deduplicate unchanged messages.
+
+Each source has custom instructions and a **Set up source** dialog. Adzuna and Brave Search credentials can be entered in forms. **Save & collect now** enables and runs the prepared collector; **Save settings only** can disable it. Unsupported interactive boards are identified with email/manual alternatives. An API key or permission setting cannot repair an unsupported parser. Recently refreshed sources retain their normal refresh interval.

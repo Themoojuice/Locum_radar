@@ -268,3 +268,28 @@ describe('path-specific robots and redirects', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+it('mailbox search requires an explicit query and can search all history without a label', () => {
+  const config = collectorConfigSchema.parse({
+    kind: 'gmail',
+    gmailMode: 'search',
+    gmailAllHistory: true,
+    query: 'locum',
+  });
+  const url = new URL(initialFrontier(config)[0].url, 'https://gmail.googleapis.com');
+  expect(url.searchParams.get('q')).toBe('locum');
+  expect(url.searchParams.has('labelIds')).toBe(false);
+  expect(() => initialFrontier({ ...config, query: '' })).toThrow('query');
+  expect(initialFrontier({ ...config, gmailAllHistory: false, lookbackDays: 90 })[0].url).toContain(
+    'newer_than',
+  );
+  const message = {
+    id: 'search-result',
+    payload: {
+      mimeType: 'text/plain',
+      body: { data: Buffer.from('Registrar locum $180 per hour').toString('base64url') },
+    },
+  };
+  expect(parseGmailMessage(message, '', 'gmail-label')).toEqual([]);
+  expect(parseGmailMessage(message, '', 'gmail-label', true)).toHaveLength(1);
+});

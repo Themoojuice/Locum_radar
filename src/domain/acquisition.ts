@@ -16,10 +16,12 @@ export const collectorConfigSchema = z.object({
     .max(500)
     .default('a[rel="next"], .pagination a, .pager a, a.next, a.page-numbers'),
   contentSelector: z.string().max(500).default('main, article, [role="main"]'),
-  maxPages: z.number().int().min(1).max(500).default(100),
-  maxRecords: z.number().int().min(1).max(2000).default(500),
+  maxPages: z.number().int().min(1).max(50000).default(100),
+  maxRecords: z.number().int().min(1).max(200000).default(500),
   delayMs: z.number().int().min(1000).max(60000).default(1500),
   query: z.string().max(500).default('locum doctor'),
+  gmailMode: z.enum(['label', 'search']).default('label'),
+  gmailAllHistory: z.boolean().default(false),
   labelId: z.string().max(200).default(''),
   lookbackDays: z.number().int().min(1).max(365).default(90),
 });

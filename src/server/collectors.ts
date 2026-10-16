@@ -18,6 +18,7 @@ import type { JsonBlock, SourceAdapter } from './adapters/json-sources';
 import { sourceAdapters } from './adapters/registry';
 import { log, stopRequested } from './progress';
 import { collectionEnabled } from './public-starter';
+import { providerEnvironment } from './credentials';
 export { publicIpv4, robotsAllows } from './acquisition/transport';
 export const allowedSourceUrl = (url: string) =>
   safeUrl(url, [
@@ -220,14 +221,14 @@ export const describeTally = (t: { imported: number; unchanged: number; queued: 
 async function runAdapter(adapter: SourceAdapter, sourceId: string) {
   let incomplete = false;
   const store = await readStore();
-  const missing = adapter.missingConfig?.(process.env);
+  const missing = adapter.missingConfig?.(providerEnvironment());
   if (missing) throw new Error(`Needs configuration: ${missing}.`);
   let delay = Number(process.env.COLLECTOR_PAGE_DELAY_MS ?? 1500);
   if (adapter.access === 'site-endpoint') {
     const robots = await fetchPage(adapter.robotsUrl!, 'text/plain');
     const paths =
       'pageUrl' in adapter
-        ? [new URL(adapter.pageUrl(1, process.env)!).pathname]
+        ? [new URL(adapter.pageUrl(1, providerEnvironment())!).pathname]
         : ['/wp-json/wp/v2/job_posts', '/doctors/jobs-board/'];
     const robotsDelay = robots.status === 200 ? robotsDelayFor(robots.text, paths) : null;
     if (robots.status !== 404 && robotsDelay === null)
@@ -252,7 +253,7 @@ async function runAdapter(adapter: SourceAdapter, sourceId: string) {
       inScope,
       log: say,
       stopped: stopRequested,
-      env: process.env,
+      env: providerEnvironment(),
     });
   } else {
     for (let page = 1; page <= adapter.maxPages; page++) {
@@ -260,7 +261,7 @@ async function runAdapter(adapter: SourceAdapter, sourceId: string) {
         say(`Stopped on request after ${page - 1} page(s).`, 'warn');
         break;
       }
-      const url = adapter.pageUrl(page, process.env);
+      const url = adapter.pageUrl(page, providerEnvironment());
       if (!url) throw new Error('This source needs configuration (for example an API key) first.');
       if (page > 1) await pause(delay);
       let response = await fetchPage(

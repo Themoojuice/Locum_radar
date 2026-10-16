@@ -1,8 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { Source, Store } from '@/domain/model';
 import { api, Badge, Modal } from './shared';
+import { jobPool } from '@/domain/job-pool';
+import { sourceSetup } from '@/domain/source-setup';
+import { ProviderSetup } from './provider-setup';
 import { configForSource } from '@/domain/source-catalog';
 import { collectorConfigSchema } from '@/domain/acquisition';
 import { CollectorSettings, GmailConnection } from './acquisition-settings';
@@ -22,6 +25,50 @@ export function SourcesView({
   const [adding, setAdding] = useState(false),
     [name, setName] = useState(''),
     [custom, setCustom] = useState(collectorConfigSchema.parse({ kind: 'feed' }));
+  const stop = useRef(false);
+  const [progress, setProgress] = useState('');
+  useEffect(
+    () => () => {
+      stop.current = true;
+    },
+    [],
+  );
+  const pool = jobPool(store);
+  const [diagnostics, setDiagnostics] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (demo) return;
+    fetch('/api/collection')
+      .then((r) => r.json())
+      .then((v) =>
+        setDiagnostics(
+          Object.fromEntries(
+            (v.sources || []).map(
+              (s: { id: string; reasons: string[]; state: string; nextAttempt: string | null }) => [
+                s.id,
+                s.reasons.length
+                  ? s.reasons.join(' · ')
+                  : s.state === 'waiting'
+                    ? 'Waiting for the next refresh' +
+                      (s.nextAttempt ? ': ' + new Date(s.nextAttempt).toLocaleString() : '')
+                    : 'Ready to collect',
+              ],
+            ),
+          ),
+        ),
+      )
+      .catch(() => {});
+  }, [demo, store]);
+  async function collectSource(id: string) {
+    stop.current = false;
+    let run;
+    do {
+      run = await api({ command: 'collect', sourceId: id });
+      setProgress(run.message);
+      notify(run.message);
+      await reload();
+    } while (!stop.current && run.status === 'partial' && run.remaining && !run.limited);
+    if (stop.current) setProgress('Paused after this batch. Collect now resumes saved progress.');
+  }
   return (
     <>
       <div className="page-intro">
@@ -35,11 +82,27 @@ export function SourcesView({
       <div className="notice">
         <ShieldCheck size={18} />
         <span>
-          Manual and email imports work now. Scheduled public collection requires recorded source
-          permission, an enabled adapter and the server’s collection switch. A source with no
-          successful run is <strong>not monitored</strong>.
+          Start with Gmail or a public board. Each source explains what it needs and whether its
+          collector has worked. A source with no successful run is <strong>not yet verified</strong>
+          .
         </span>
       </div>
+      {progress && (
+        <div className="panel" role="status">
+          {progress}
+          {busy && (
+            <button
+              className="button secondary"
+              onClick={() => {
+                stop.current = true;
+                setProgress('Pausing after this batch…');
+              }}
+            >
+              Pause collection
+            </button>
+          )}
+        </div>
+      )}
       <div className="source-list">
         {!demo && (
           <section className="panel">
@@ -75,7 +138,7 @@ export function SourcesView({
             </div>
           </section>
         )}
-        {!demo && <GmailConnection />}
+        {!demo && <GmailConnection store={store} reload={reload} />}
         {store.sources.map((source) => {
           const offers = store.offers.filter((o) => o.sourceId === source.id),
             unique = new Set(offers.map((o) => o.opportunityId)).size,
@@ -107,12 +170,21 @@ export function SourcesView({
                     : source.method !== 'manual'
                       ? `${configForSource(source)?.kind || 'Structured-page'} collector`
                       : 'Manual import'}{' '}
-                  · {source.permission === 'approved' ? 'Access recorded' : 'Access not approved'}
                 </p>
-                {source.qualification && <p className="small muted">{source.qualification}</p>}
+                <ol className="small">
+                  {sourceSetup(source).map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                {diagnostics[source.id] && (
+                  <p className="small">
+                    <strong>Next step:</strong> {diagnostics[source.id]}
+                  </p>
+                )}
                 {source.error && <p className="error small">{source.error}</p>}
                 <p className="small">
-                  {unique} observed vacancies · {exclusive} unique to this source ·{' '}
+                  {pool.filter((item) => item.sources.includes(source.id)).length} browsable adverts
+                  · {unique} confirmed vacancies · {exclusive} unique to this source ·{' '}
                   {source.lastSuccess
                     ? `Last successful collection: ${new Date(source.lastSuccess).toLocaleString('en-AU')}`
                     : 'No successful collection recorded'}
@@ -144,7 +216,7 @@ export function SourcesView({
                         })
                       }
                     >
-                      Collection settings
+                      Set up source
                     </button>
                     <button
                       className="icon-button"
@@ -153,9 +225,7 @@ export function SourcesView({
                       onClick={async () => {
                         setBusy(true);
                         try {
-                          const run = await api({ command: 'collect', sourceId: source.id });
-                          notify(run.message);
-                          await reload();
+                          await collectSource(source.id);
                         } catch (e) {
                           notify((e as Error).message);
                         } finally {
@@ -163,7 +233,7 @@ export function SourcesView({
                         }
                       }}
                     >
-                      <RefreshCw size={17} />
+                      <RefreshCw size={17} /> Collect now
                     </button>
                   </>
                 )}
@@ -177,64 +247,87 @@ export function SourcesView({
         {!store.runs.length ? (
           <p className="muted">No runs yet. An empty history does not establish live coverage.</p>
         ) : (
-          store.runs.slice(0, 20).map((r) => (
-            <div className="run-row" key={r.id}>
-              <Badge tone={r.status === 'failed' ? 'amber' : r.status === 'success' ? 'green' : ''}>
-                {r.status}
-              </Badge>
-              <span>{store.sources.find((s) => s.id === r.sourceId)?.name}</span>
-              <span className="muted small">{r.message}</span>
-              <time className="small">{new Date(r.startedAt).toLocaleString('en-AU')}</time>
-            </div>
-          ))
+          [...store.runs]
+            .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+            .slice(0, 20)
+            .map((r) => (
+              <div className="run-row" key={r.id}>
+                <Badge
+                  tone={r.status === 'failed' ? 'amber' : r.status === 'success' ? 'green' : ''}
+                >
+                  {r.status}
+                </Badge>
+                <span>{store.sources.find((s) => s.id === r.sourceId)?.name}</span>
+                <span className="muted small">{r.message}</span>
+                <time className="small">{new Date(r.startedAt).toLocaleString('en-AU')}</time>
+              </div>
+            ))
         )}
       </section>
       {edit && (
-        <Modal title={`Access · ${edit.name}`} onClose={() => setEdit(null)}>
-          <p className="muted">
-            Record the source’s permission or applicable access terms. Personal use alone is not
-            recorded as permission.
-          </p>
-          <label>
-            Access review
-            <select
-              value={edit.permission}
-              onChange={(e) =>
-                setEdit({ ...edit, permission: e.target.value as Source['permission'] })
-              }
-            >
-              <option value="unreviewed">Not reviewed</option>
-              <option value="approved">Permission established</option>
-              <option value="denied">Automated access not permitted</option>
-            </select>
-          </label>
-          <label>
-            Permission evidence / terms reference
-            <textarea
-              value={edit.permissionEvidence}
-              onChange={(e) => setEdit({ ...edit, permissionEvidence: e.target.value })}
-              rows={5}
-              placeholder="Applicable terms URL or permission from the source, review date, and limits"
-            />
-          </label>
+        <Modal title={`Set up · ${edit.name}`} onClose={() => setEdit(null)}>
+          <ol>
+            {sourceSetup(edit).map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          {['adzuna', 'search'].includes(configForSource(edit)?.kind || '') && (
+            <ProviderSetup kind={configForSource(edit)?.kind as 'adzuna' | 'search'} />
+          )}
+          {edit.id === 'gmail-label' && (
+            <a className="button secondary" href="#gmail-import" onClick={() => setEdit(null)}>
+              Open Gmail import
+            </a>
+          )}
+          <details>
+            <summary>
+              Access settings {edit.permission === 'denied' ? '— specific permission required' : ''}
+            </summary>
+            <p className="small">
+              Collection uses prepared source limits and honours robots rules. If automated access
+              has been refused, use emails or record specific permission here.
+            </p>
+            <label>
+              Access review
+              <select
+                value={edit.permission}
+                onChange={(e) =>
+                  setEdit({ ...edit, permission: e.target.value as Source['permission'] })
+                }
+              >
+                <option value="unreviewed">Public-board setup</option>
+                <option value="approved">Access recorded</option>
+                <option value="denied">Automated access not permitted</option>
+              </select>
+            </label>
+            <label>
+              Access notes or specific permission reference
+              <textarea
+                value={edit.permissionEvidence}
+                onChange={(e) => setEdit({ ...edit, permissionEvidence: e.target.value })}
+              />
+            </label>
+          </details>
           <label className="checkbox-row">
             <input
               type="checkbox"
               checked={edit.enabled}
               onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })}
             />
-            Enable this adapter (24-hour minimum interval)
+            Enable automatic collection (normally once a day)
           </label>
           <p className="small muted">
-            Scans follow the configured scope and save their progress after each page. Increase
-            limits to continue a capped scan. New records go to review. The server must also set
-            COLLECTOR_ENABLED=true.
+            Save & collect now enables this source and follows saved batches. New adverts appear on
+            Discover. A recently refreshed source will report when it can run again.
           </p>
           {edit.collector && (
-            <CollectorSettings
-              value={edit.collector}
-              change={(collector) => setEdit({ ...edit, collector })}
-            />
+            <details>
+              <summary>Advanced page and search settings</summary>
+              <CollectorSettings
+                value={edit.collector}
+                change={(collector) => setEdit({ ...edit, collector })}
+              />
+            </details>
           )}
           <button
             className="button primary"
@@ -245,14 +338,16 @@ export function SourcesView({
                 await api({
                   command: 'source',
                   sourceId: edit.id,
-                  permission: edit.permission,
-                  permissionEvidence: edit.permissionEvidence,
-                  enabled: edit.enabled,
+                  permission: edit.permission === 'denied' ? 'denied' : 'approved',
+                  permissionEvidence:
+                    edit.permissionEvidence ||
+                    'User enabled collection of public advertisements with prepared collector limits.',
+                  enabled: true,
                   collector: edit.collector,
                 });
                 await reload();
                 setEdit(null);
-                notify('Source settings saved');
+                await collectSource(edit.id);
               } catch (e) {
                 notify((e as Error).message);
               } finally {
@@ -260,7 +355,34 @@ export function SourcesView({
               }
             }}
           >
-            Save access settings
+            Save & collect now
+          </button>
+          <button
+            className="button secondary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api({
+                  command: 'source',
+                  sourceId: edit.id,
+                  permission: edit.permission === 'denied' ? 'denied' : 'approved',
+                  permissionEvidence:
+                    edit.permissionEvidence || 'User configured public-board collection.',
+                  enabled: edit.enabled,
+                  collector: edit.collector,
+                });
+                await reload();
+                setEdit(null);
+                notify('Settings saved');
+              } catch (e) {
+                notify((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Save settings only
           </button>
           <button
             className="button secondary"

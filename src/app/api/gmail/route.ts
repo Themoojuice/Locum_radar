@@ -41,7 +41,9 @@ export async function POST(request: Request) {
     return response;
   } catch {
     return NextResponse.json(
-      { error: 'Configure GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and SESSION_SECRET first.' },
+      {
+        error: 'Open Sources → Import from Gmail and save your Google client ID and secret first.',
+      },
       { status: 400 },
     );
   }

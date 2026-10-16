@@ -5,6 +5,7 @@ import { collectionPlan } from '@/domain/collection';
 import { gmailStatus } from '@/server/acquisition/gmail';
 import { sourceAdapters } from '@/server/adapters/registry';
 import { collectionEnabled } from '@/server/public-starter';
+import { credential, providerEnvironment } from '@/server/credentials';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
@@ -17,16 +18,16 @@ export async function GET(request: Request) {
         ...collectionPlan(await readStore(), collectionEnabled(), Date.now(), {
           ...Object.fromEntries(
             Object.values(sourceAdapters).flatMap((a) => {
-              const missing = a.missingConfig?.(process.env);
+              const missing = a.missingConfig?.(providerEnvironment());
               return missing ? [[a.sourceId, missing]] : [];
             }),
           ),
           gmail: gmail.connected ? [] : ['Connect Gmail in Sources'],
           adzuna:
-            process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY
+            credential('ADZUNA_APP_ID') && credential('ADZUNA_APP_KEY')
               ? []
               : ['Adzuna API credentials needed'],
-          search: process.env.BRAVE_SEARCH_API_KEY ? [] : ['Brave Search API key needed'],
+          search: credential('BRAVE_SEARCH_API_KEY') ? [] : ['Brave Search API key needed'],
         }),
         automaticStarter: collectionEnabled(),
       },

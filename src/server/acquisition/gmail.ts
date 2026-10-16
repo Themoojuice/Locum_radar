@@ -13,10 +13,15 @@ import { plainText } from '../extraction';
 import { candidate, type Candidate } from './parsers';
 import { transaction } from '../database';
 import { configForSource } from '@/domain/source-catalog';
+import { credential, installationKey } from '../credentials';
 export const gmailScope = 'https://www.googleapis.com/auth/gmail.readonly';
-const tokenFile = () => path.resolve('data/secrets/gmail.enc');
+const tokenFile = () =>
+  path.resolve(
+    /* turbopackIgnore: true */ process.env.RADAR_SECRETS_DIR || 'data/secrets',
+    'gmail.enc',
+  );
 function key() {
-  const secret = process.env.SESSION_SECRET || '';
+  const secret = process.env.SESSION_SECRET || installationKey().toString('hex');
   if (secret.length < 32)
     throw new Error('Gmail requires SESSION_SECRET with at least 32 characters');
   return createHash('sha256')
@@ -36,17 +41,13 @@ export function unseal<T>(text: string): T {
   return JSON.parse(Buffer.concat([decipher.update(b.subarray(28)), decipher.final()]).toString());
 }
 export function gmailConfigured() {
-  return (
-    !!process.env.GMAIL_CLIENT_ID &&
-    !!process.env.GMAIL_CLIENT_SECRET &&
-    (process.env.SESSION_SECRET?.length || 0) >= 32
-  );
+  return !!credential('GMAIL_CLIENT_ID') && !!credential('GMAIL_CLIENT_SECRET');
 }
 function client() {
   if (!gmailConfigured()) throw new Error('Configure the Google client and session secret first');
   return new OAuth2Client(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
+    credential('GMAIL_CLIENT_ID'),
+    credential('GMAIL_CLIENT_SECRET'),
     configuration().origin.origin + '/api/gmail/callback',
   );
 }
@@ -111,7 +112,7 @@ async function resetGmailSelection() {
       const config = configForSource(source);
       if (config?.kind !== 'gmail') continue;
       source.enabled = false;
-      source.collector = { ...config, labelId: '' };
+      source.collector = { ...config, labelId: '', gmailMode: 'label' };
       delete source.crawl;
       source.lastSuccess = null;
       source.lastAttempt = null;
@@ -180,8 +181,9 @@ export function parseGmailMessage(
   message: { id: string; labelIds?: string[]; internalDate?: string; payload?: GmailPart },
   labelId: string,
   sourceId: string,
+  searchMatched = false,
 ): Candidate[] {
-  if (!labelId || !message.labelIds?.includes(labelId)) return [];
+  if (!searchMatched && (!labelId || !message.labelIds?.includes(labelId))) return [];
   const texts: string[] = [],
     html: string[] = [],
     attachments: string[] = [];

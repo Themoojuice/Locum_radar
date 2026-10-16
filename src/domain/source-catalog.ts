@@ -207,7 +207,7 @@ export const sourceRecipes: SourceRecipe[] = [
     type: 'email',
     config: collectorConfigSchema.parse({ kind: 'gmail', maxPages: 200 }),
     qualification:
-      'Read-only OAuth and selected-label collection; requires your Google client and consent. Never scans without a selected label.',
+      'Read-only Gmail import using an explicit selected label or search query. Guided Google setup is available in Sources.',
   },
   {
     id: 'forum-search',

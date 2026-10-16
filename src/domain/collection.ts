@@ -26,7 +26,8 @@ export function collectionPlan(
         crawl = source.method === 'json-api' ? undefined : source.crawl;
       if (source.method === 'manual' || (!config && source.method !== 'json-api'))
         reasons.push('Choose a collector recipe');
-      if (config?.kind === 'gmail' && !config.labelId) reasons.push('Select a Gmail label');
+      if (config?.kind === 'gmail' && config.gmailMode !== 'search' && !config.labelId)
+        reasons.push('Select a Gmail label');
       for (const key of new Set([source.id, config?.kind || ''])) {
         const reason = setup[key];
         if (reason) reasons.push(...(Array.isArray(reason) ? reason : [reason]));

@@ -191,6 +191,7 @@ export async function POST(request: Request) {
             if (source.crawl?.leaseUntil && Date.parse(source.crawl.leaseUntil) > Date.now())
               throw new Error('Wait for the current batch before changing the search scope');
             delete source.crawl;
+            source.lastAttempt = null;
           }
           if (
             body.enabled &&

@@ -2,13 +2,22 @@ import type { CollectorConfig, FrontierItem } from '@/domain/acquisition';
 import { candidate, parseFeed, parseWeb, type ParsedPage } from './parsers';
 import { gmailLabels, gmailRequest, parseGmailMessage, type GmailPart } from './gmail';
 import { PoliteReader, requestPage } from './transport';
+import { credential } from '../credentials';
 export function initialFrontier(config: CollectorConfig): FrontierItem[] {
   if (config.kind === 'gmail') {
-    if (!config.labelId) throw new Error('Select a Gmail label before collecting');
+    if (config.gmailMode === 'search' && !config.query.trim())
+      throw new Error('Enter a Gmail search query');
+    if (config.gmailMode !== 'search' && !config.labelId)
+      throw new Error('Select a Gmail label before collecting');
     const params = new URLSearchParams({
-      labelIds: config.labelId,
+      ...(config.gmailMode === 'search' ? {} : { labelIds: config.labelId }),
       maxResults: '25',
-      q: 'newer_than:' + config.lookbackDays + 'd',
+      q: [
+        config.gmailMode === 'search' ? config.query : '',
+        config.gmailAllHistory ? '' : 'newer_than:' + config.lookbackDays + 'd',
+      ]
+        .filter(Boolean)
+        .join(' '),
     });
     return [{ kind: 'api', url: '/gmail/v1/users/me/messages?' + params }];
   }
@@ -99,7 +108,7 @@ export function pageProcessor(
   let gmailLabelChecked = false;
   return async (item: FrontierItem): Promise<ParsedPage> => {
     if (config.kind === 'gmail') {
-      if (!gmailLabelChecked) {
+      if (config.gmailMode !== 'search' && !gmailLabelChecked) {
         if (!(await gmailLabels()).some((l) => l.id === config.labelId))
           throw new Error('Selected Gmail label no longer exists; collection stopped');
         gmailLabelChecked = true;
@@ -112,7 +121,12 @@ export function pageProcessor(
           payload?: GmailPart;
         }>(item.url);
         return {
-          candidates: parseGmailMessage(data, config.labelId, sourceId),
+          candidates: parseGmailMessage(
+            data,
+            config.labelId,
+            sourceId,
+            config.gmailMode === 'search',
+          ),
           links: [],
           recognised: true,
         };
@@ -132,7 +146,7 @@ export function pageProcessor(
       return { candidates: [], links, recognised: true };
     }
     if (config.kind === 'adzuna') {
-      if (!process.env.ADZUNA_APP_ID || !process.env.ADZUNA_APP_KEY)
+      if (!credential('ADZUNA_APP_ID') || !credential('ADZUNA_APP_KEY'))
         throw new Error('Adzuna API credentials are missing');
       const url = new URL(item.url);
       if (
@@ -141,8 +155,8 @@ export function pageProcessor(
       )
         throw new Error('Invalid Adzuna cursor');
       url.search = new URLSearchParams({
-        app_id: process.env.ADZUNA_APP_ID,
-        app_key: process.env.ADZUNA_APP_KEY,
+        app_id: credential('ADZUNA_APP_ID'),
+        app_key: credential('ADZUNA_APP_KEY'),
         what: config.query,
         results_per_page: '50',
         sort_by: 'date',
@@ -154,7 +168,7 @@ export function pageProcessor(
       return parseAdzuna(JSON.parse(response.text), item.url, sourceId);
     }
     if (config.kind === 'search') {
-      if (!process.env.BRAVE_SEARCH_API_KEY) throw new Error('Brave Search API key is missing');
+      if (!credential('BRAVE_SEARCH_API_KEY')) throw new Error('Brave Search API key is missing');
       const url = new URL(item.url);
       if (url.origin !== 'https://api.search.brave.com' || url.pathname !== '/res/v1/web/search')
         throw new Error('Invalid search cursor');
@@ -165,7 +179,7 @@ export function pageProcessor(
         start = new Date(Date.now() - config.lookbackDays * 86400000).toISOString().slice(0, 10);
       url.searchParams.set('freshness', start + 'to' + end);
       const response = await requestPage(url.href, ['api.search.brave.com'], {
-        'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY,
+        'X-Subscription-Token': credential('BRAVE_SEARCH_API_KEY'),
       });
       if (response.status !== 200) throw new Error('Search API HTTP ' + response.status);
       return parseSearch(JSON.parse(response.text), item.url, sourceId);

@@ -371,7 +371,8 @@ test('source catalog exposes label-only Gmail setup and saves a custom feed', as
   const gmail = page
     .locator('.source-card')
     .filter({ has: page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }) });
-  await gmail.getByRole('button', { name: 'Collection settings' }).click();
+  await gmail.getByRole('button', { name: 'Set up source' }).click();
+  await page.getByText('Advanced page and search settings', { exact: true }).click();
   await expect(page.getByLabel('Import only this Gmail label')).toHaveValue('');
   await expect(page.getByLabel('Maximum pages / messages per scan')).toHaveValue('200');
   await page.screenshot({ path: 'test-results/gmail-settings.png' });
@@ -387,10 +388,149 @@ test('source catalog exposes label-only Gmail setup and saves a custom feed', as
   const feed = page
     .locator('.source-card')
     .filter({ has: page.getByRole('heading', { name: 'Fixture feed', exact: true }) });
-  await feed.getByRole('button', { name: 'Collection settings' }).click();
+  await feed.getByRole('button', { name: 'Set up source' }).click();
+  await page.getByText('Advanced page and search settings', { exact: true }).click();
   await expect(page.getByLabel('Starting URLs (one per line)')).toHaveValue(
     'https://example.com/jobs.xml\nhttps://example.com/other.xml',
   );
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.screenshot({ path: 'test-results/acquisition-sources.png' });
+});
+
+test('Gmail guided import searches all history and drains batches into the board', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  let collected = 0;
+  let settings: Record<string, unknown> | undefined;
+  await page.route('**/api/gmail', (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        connected: true,
+        labels: [{ id: 'Label_jobs', name: 'Recruitment' }],
+      },
+    }),
+  );
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: collectionPlan(store, false) }),
+  );
+  await page.route('**/api/radar', async (route) => {
+    if (route.request().method() === 'GET')
+      return route.fulfill({ json: { ...store, starterAvailable: true } });
+    const body = route.request().postDataJSON();
+    if (body.command === 'source') settings = body;
+    if (body.command === 'collect') {
+      collected++;
+      return route.fulfill({
+        json:
+          collected === 1
+            ? { status: 'partial', remaining: 1, message: 'First email imported' }
+            : { status: 'success', remaining: 0, message: 'All matching emails processed' },
+      });
+    }
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await expect(page.getByLabel('Emails to import')).toHaveValue('search');
+  await expect(page.getByLabel('Search all email history')).toBeChecked();
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('All matching emails processed');
+  expect(collected).toBe(2);
+  expect(settings?.enabled).toBe(true);
+  expect(settings?.collector).toMatchObject({
+    kind: 'gmail',
+    gmailMode: 'search',
+    gmailAllHistory: true,
+    labelId: '',
+  });
+  await page.getByLabel('Emails to import').selectOption('label');
+  await page.getByLabel('Gmail label', { exact: true }).selectOption('Label_jobs');
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await expect
+    .poll(() => settings?.collector)
+    .toMatchObject({ gmailMode: 'label', labelId: 'Label_jobs' });
+});
+test('Google setup saves credentials through a form without exposing them in status', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  let saved: Record<string, string> | undefined;
+  let configured = false;
+  await page.route('**/api/radar', (route) =>
+    route.fulfill({ json: { ...store, starterAvailable: true } }),
+  );
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: collectionPlan(store, false) }),
+  );
+  await page.route('**/api/gmail', (route) =>
+    route.fulfill({ json: { configured, connected: false, labels: [] } }),
+  );
+  await page.route('**/api/setup', (route) => {
+    if (route.request().method() === 'POST') {
+      saved = route.request().postDataJSON();
+      configured = true;
+      return route.fulfill({ json: { ok: true } });
+    }
+    return route.fulfill({
+      json: { configured: {}, redirectUri: 'http://127.0.0.1:3100/api/gmail/callback' },
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page
+    .getByLabel('Google client ID', { exact: true })
+    .fill('fixture.apps.googleusercontent.com');
+  await page.getByLabel('Google client secret', { exact: true }).fill('fixture-secret');
+  await page.getByRole('button', { name: 'Save connection settings' }).click();
+  await expect(page.getByRole('button', { name: 'Connect Gmail with Google' })).toBeEnabled();
+  expect(saved).toEqual({
+    GMAIL_CLIENT_ID: 'fixture.apps.googleusercontent.com',
+    GMAIL_CLIENT_SECRET: 'fixture-secret',
+  });
+  await expect(page.locator('body')).not.toContainText('fixture-secret');
+});
+
+test('public source setup enables and collects without a generic permission form', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  let configured = false;
+  let collected = false;
+  await page.route('**/api/collection', (route) =>
+    route.fulfill({ json: collectionPlan(store, false) }),
+  );
+  await page.route('**/api/gmail', (route) =>
+    route.fulfill({ json: { configured: false, connected: false, labels: [] } }),
+  );
+  await page.route('**/api/setup', (route) =>
+    route.fulfill({
+      json: { configured: {}, redirectUri: 'http://127.0.0.1:3100/api/gmail/callback' },
+    }),
+  );
+  await page.route('**/api/radar', (route) => {
+    if (route.request().method() === 'GET')
+      return route.fulfill({ json: { ...store, starterAvailable: true } });
+    const body = route.request().postDataJSON();
+    if (body.command === 'source')
+      configured = body.enabled && body.permission === 'approved' && !!body.permissionEvidence;
+    if (body.command === 'collect') {
+      collected = true;
+      return route.fulfill({
+        json: { status: 'success', remaining: 0, message: 'Source checked successfully' },
+      });
+    }
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  const source = page
+    .locator('.source-card')
+    .filter({ has: page.getByRole('heading', { name: 'Medrecruit', exact: true }) });
+  await source.getByRole('button', { name: 'Set up source' }).click();
+  await expect(page.getByRole('dialog')).toContainText('no login or API key');
+  await page.getByRole('button', { name: 'Save & collect now' }).click();
+  await expect.poll(() => collected).toBe(true);
+  expect(configured).toBe(true);
 });
