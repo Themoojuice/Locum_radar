@@ -6,6 +6,7 @@ import { collectorConfigSchema } from '@/domain/acquisition';
 import { api } from './shared';
 import { ProviderSetup } from './provider-setup';
 import { useRef } from 'react';
+import { gmailErrorMessage } from '@/domain/gmail-errors';
 const locumQuery =
   '{locum locums "locum tenens" "doctor vacancy" "medical vacancy" "registrar cover"} -in:trash -in:spam';
 export function GmailConnection({ store, reload }: { store: Store; reload: () => Promise<void> }) {
@@ -33,6 +34,7 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
   }
   useEffect(() => {
     let active = true;
+    const params = new URLSearchParams(window.location.search);
     fetch('/api/gmail', { cache: 'no-store' })
       .then(async (r) => {
         const v = await r.json();
@@ -42,6 +44,15 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       .then((v) => {
         if (active) {
           setStatus(v);
+          if (params.get('gmail') === 'error')
+            setMessage(
+              gmailErrorMessage(params.get('gmail_reason')) +
+                ' Reference: ' +
+                (params
+                  .get('gmail_reason')
+                  ?.replace(/[^a-z_]/g, '')
+                  .slice(0, 30) || 'unknown'),
+            );
           if (v.error) setMessage(v.error);
         }
       })

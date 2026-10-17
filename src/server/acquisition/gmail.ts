@@ -14,6 +14,7 @@ import { candidate, type Candidate } from './parsers';
 import { transaction } from '../database';
 import { configForSource } from '@/domain/source-catalog';
 import { credential, installationKey } from '../credentials';
+import { GmailConnectionError } from '@/domain/gmail-errors';
 export const gmailScope = 'https://www.googleapis.com/auth/gmail.readonly';
 const tokenFile = () =>
   path.resolve(
@@ -90,21 +91,30 @@ export async function beginGmail() {
   };
 }
 export async function finishGmail(code: string, state: string, cookie: string) {
-  const saved = unseal<{ state: string; codeVerifier: string; expires: number }>(cookie);
+  let saved: { state: string; codeVerifier: string; expires: number };
+  try {
+    saved = unseal(cookie);
+  } catch {
+    throw new GmailConnectionError('expired');
+  }
   if (
     saved.expires < Date.now() ||
     state.length !== saved.state.length ||
     !timingSafeEqual(Buffer.from(state), Buffer.from(saved.state))
   )
-    throw new Error('OAuth state expired or mismatched');
+    throw new GmailConnectionError('expired');
   const oauth = client();
   const { tokens } = await oauth.getToken({ code, codeVerifier: saved.codeVerifier });
-  if (!tokens.refresh_token || !tokens.scope?.split(' ').includes(gmailScope))
-    throw new Error('Read-only Gmail access was not granted');
-  await resetGmailSelection();
-  const work = tokenQueue.catch(() => {}).then(() => saveTokens(tokens));
-  tokenQueue = work;
-  await work;
+  if (!tokens.scope?.split(' ').includes(gmailScope)) throw new GmailConnectionError('scope');
+  if (!tokens.refresh_token) throw new GmailConnectionError('refresh');
+  try {
+    await resetGmailSelection();
+    const work = tokenQueue.catch(() => {}).then(() => saveTokens(tokens));
+    tokenQueue = work;
+    await work;
+  } catch {
+    throw new GmailConnectionError('storage');
+  }
 }
 async function resetGmailSelection() {
   await transaction((store) => {
