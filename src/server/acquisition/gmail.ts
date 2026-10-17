@@ -9,7 +9,8 @@ import {
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { configuration } from '../auth';
-import { plainText } from '../extraction';
+import { detectEmailFormat, splitRecruiterEmail } from '../adapters/email-formats';
+import { plainText, fromLabelledBlock } from '../extraction';
 import { candidate, type Candidate } from './parsers';
 import { transaction } from '../database';
 import { configForSource } from '@/domain/source-catalog';
@@ -209,7 +210,7 @@ export function parseGmailMessage(
     if (part.body?.data && part.body.data.length <= 2000000) {
       const value = Buffer.from(part.body.data, 'base64url').toString('utf8');
       if (part.mimeType === 'text/plain') texts.push(value);
-      else if (part.mimeType === 'text/html') html.push(plainText(value));
+      else if (part.mimeType === 'text/html') html.push(value);
     }
     part.parts?.forEach((p) => walk(p, depth + 1));
   };
@@ -218,15 +219,30 @@ export function parseGmailMessage(
   const subject =
     headers.find((h) => h.name.toLowerCase() === 'subject')?.value || 'Recruiter message';
   const sender = headers.find((h) => h.name.toLowerCase() === 'from')?.value || 'Unknown sender';
-  const body = (texts.length ? texts : html).join('\n').slice(0, 100000);
+  const body = (texts.length ? texts : html.map(plainText)).join('\n').slice(0, 100000);
   const parts = body
     .split(/\n\s*---+\s*\n/)
     .filter(Boolean)
     .slice(0, 100);
   if (!parts.length) parts.push('No readable message body. Review the original email.');
   const timestamp = Number(message.internalDate);
-  return parts.flatMap((part, index) => {
-    const screening = screenEmail(subject, part, sender, approvedSenders, !searchMatched);
+  const emailParts = {
+    text: body,
+    html: html.join('\n'),
+    from: sender,
+    subject,
+    sentAt: Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp) : undefined,
+  };
+  const format = detectEmailFormat(emailParts);
+  const blocks = format ? splitRecruiterEmail(format, emailParts) : [];
+  return (blocks.length ? blocks.map((b) => b.raw) : parts).flatMap((part, index) => {
+    const screening = screenEmail(
+      subject,
+      part + (blocks[index] ? '\n' + blocks[index].labelled : ''),
+      sender,
+      approvedSenders,
+      !searchMatched,
+    );
     if (screening.status === 'ignore') return [];
     const item = candidate(
       subject,
@@ -237,6 +253,13 @@ export function parseGmailMessage(
       'email',
       Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : null,
     );
+    if (blocks[index] && format) {
+      const extraction = fromLabelledBlock(blocks[index], sourceId, format);
+      extraction.draft.externalId = item.externalId;
+      extraction.draft.rawText = `Sender: ${sender}\nSubject: ${subject}\n${blocks[index].raw}`;
+      item.extractions = [extraction];
+      item.title = extraction.draft.title || subject;
+    }
     item.emailScreen = screening;
     item.extractions.forEach((e) => e.issues.unshift(screening.reason));
     if (attachments.length)

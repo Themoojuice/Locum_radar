@@ -437,7 +437,7 @@ test('Gmail guided import searches all history and drains batches into the board
   await expect(page.getByLabel('Search all email history')).not.toBeChecked();
   await expect(page.getByLabel('Days to look back')).toHaveValue('30');
   await page.getByLabel('Search all email history').check();
-  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page.getByRole('button', { name: 'Search with custom settings', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('All matching emails processed');
   expect(collected).toBe(2);
   expect(settings?.enabled).toBe(true);
@@ -449,7 +449,7 @@ test('Gmail guided import searches all history and drains batches into the board
   });
   await page.getByLabel('Emails to import').selectOption('label');
   await page.getByLabel('Gmail label', { exact: true }).selectOption('Label_jobs');
-  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page.getByRole('button', { name: 'Search with custom settings', exact: true }).click();
   await expect
     .poll(() => settings?.collector)
     .toMatchObject({ gmailMode: 'label', labelId: 'Label_jobs' });
@@ -599,4 +599,55 @@ test('screened personal emails stay out of the board until explicitly shown', as
   await page.getByLabel('Show emails held for screening').check();
   await expect(page.locator('.job-card')).toHaveCount(1);
   await expect(page.locator('.job-card')).toContainText('Held for screening');
+});
+
+test('Gmail quick search overrides all-history and streams batch findings', async ({ page }) => {
+  const store = emptyStore();
+  let saved: Record<string, unknown> | undefined;
+  await page.route('**/api/gmail', (r) =>
+    r.fulfill({ json: { configured: true, connected: true, labels: [] } }),
+  );
+  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
+  await page.route('**/api/radar', async (r) => {
+    if (r.request().method() === 'GET')
+      return r.fulfill({ json: { ...store, starterAvailable: true } });
+    const body = r.request().postDataJSON();
+    if (body.command === 'source') saved = body;
+    if (body.command === 'collect')
+      return r.fulfill({
+        json: {
+          status: 'success',
+          message: 'Scan finished',
+          count: 1,
+          remaining: 0,
+          gmailSkipped: 2,
+          gmailFindings: [
+            {
+              id: 'fixture',
+              title: 'Registrar � Example Hospital',
+              status: 'offer',
+              detail: '$180 per hour',
+            },
+          ],
+        },
+      });
+    return r.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page.getByLabel('Approved recruiter email addresses or domains').fill('@1medical.com.au');
+  await page.getByLabel('Search all email history').check();
+  await page.getByRole('button', { name: 'Search Gmail � last 30 days', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
+    'Registrar � Example Hospital',
+  );
+  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
+    '2 messages skipped',
+  );
+  expect(saved?.collector).toMatchObject({
+    gmailAllHistory: false,
+    lookbackDays: 30,
+    query: '{from:1medical.com.au} -in:trash -in:spam',
+  });
+  expect(saved?.refreshGmail).toBe(true);
 });

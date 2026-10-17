@@ -36,6 +36,8 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
         .filter((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)),
     ),
   ];
+  const [findings, setFindings] = useState<NonNullable<CollectionRun['gmailFindings']>>([]);
+  const [skipped, setSkipped] = useState(0);
   const stop = useRef(false);
   async function refresh() {
     const r = await fetch('/api/gmail', { cache: 'no-store' });
@@ -94,7 +96,24 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       setBusy(false);
     }
   }
-  async function collect() {
+  async function collect(recent = false) {
+    setFindings([]);
+    setSkipped(0);
+    setMessage('Searching Gmail� results appear here after each small batch.');
+    const approved = senders
+      .split(/[\n,]+/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const recentQuery =
+      mode === 'search' && approved.length
+        ? '{' +
+          approved.map((v) => 'from:' + v.replace(/^@/, '')).join(' ') +
+          '} -in:trash -in:spam'
+        : query;
+    if (recent) {
+      setAllHistory(false);
+      setDays(30);
+    }
     setBusy(true);
     stop.current = false;
     try {
@@ -102,6 +121,7 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       await api({
         command: 'source',
         sourceId: 'gmail-label',
+        refreshGmail: true,
         enabled: true,
         permission: 'approved',
         permissionEvidence:
@@ -111,13 +131,13 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
           kind: 'gmail',
           gmailMode: mode,
           labelId: mode === 'label' ? label : '',
-          query,
+          query: recent ? recentQuery : query,
           gmailSenders: senders
             .split(/[\n,]+/)
             .map((v) => v.trim())
             .filter(Boolean),
-          gmailAllHistory: allHistory,
-          lookbackDays: days,
+          gmailAllHistory: recent ? false : allHistory,
+          lookbackDays: recent ? 30 : days,
           maxPages: 50000,
           maxRecords: 200000,
         }),
@@ -126,6 +146,12 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       do {
         run = await api({ command: 'collect', sourceId: 'gmail-label' });
         setMessage(run.message);
+        setFindings((previous) => {
+          const unique = new Map(previous.map((f) => [f.id, f]));
+          for (const finding of run.gmailFindings || []) unique.set(finding.id, finding);
+          return [...unique.values()];
+        });
+        setSkipped((previous) => previous + (run.gmailSkipped || 0));
         await reload();
       } while (!stop.current && run.status === 'partial' && !!run.remaining && !run.limited);
       if (stop.current)
@@ -156,6 +182,17 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       )}
       {status?.connected && (
         <>
+          <button
+            className="button primary"
+            disabled={busy || (mode === 'label' ? !label : !query.trim())}
+            onClick={() => collect(true)}
+          >
+            Search Gmail � last 30 days
+          </button>
+          <p className="small muted">
+            Uses your selected label, or searches approved recruiters when supplied (otherwise your
+            search below). Older emails are excluded.
+          </p>
           <label>
             Emails to import
             <select
@@ -259,9 +296,9 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
             <button
               className="button primary"
               disabled={busy || (mode === 'label' ? !label : !query.trim())}
-              onClick={collect}
+              onClick={() => collect()}
             >
-              Import from Gmail
+              Search with custom settings
             </button>
             {busy && (
               <button
@@ -295,6 +332,30 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
         <ProviderSetup kind="gmail" onSaved={() => void refresh()} />
       )}
       {message && <p role="status">{message}</p>}
+      {(busy || findings.length > 0 || skipped > 0) && (
+        <section aria-label="Gmail scan results">
+          <h3>Results from this scan</h3>
+          <p aria-live="polite">
+            {findings.filter((f) => f.status === 'offer').length} offers �{' '}
+            {findings.filter((f) => f.status === 'review').length} held for review � {skipped}{' '}
+            messages skipped
+          </p>
+          <p className="small muted">
+            Updates after each batch, including offers already known. Offers appear on Discover;
+            held items need screening. Skipped personal emails are not displayed.
+          </p>
+          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+            {findings.map((f) => (
+              <details key={f.id} className="panel">
+                <summary>
+                  {f.status === 'offer' ? 'Offer' : 'Held for review'} � {f.title}
+                </summary>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{f.detail}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
     </section>
   );
 }

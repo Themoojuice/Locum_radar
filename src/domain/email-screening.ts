@@ -19,7 +19,7 @@ export function screenEmail(
   // Do not qualify an unrelated reply solely from a quoted historical advert.
   const text = (subject + '\n' + body.split(/\n(?:On .+wrote:|From:|>)/i)[0]).slice(0, 100000);
   const role =
-    /\b(registrar|resident medical officer|rmo|sho|general practitioner|gp|doctor|physician|surgeon|anaesthetist|psychiatrist|paediatrician|consultant|smo|facem)\b/i.test(
+    /\b(registrar|resident medical officer|rmo|srmo|hmo|pho|cmo|sho|general practitioner|gp|doctor|physician|surgeon|anaesthetist|psychiatrist|paediatrician|consultant|smo|facem)\b/i.test(
       text,
     );
   const hiring =

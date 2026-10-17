@@ -12,7 +12,8 @@ import { grades, specialties, states } from '@/domain/model';
  * blocks with fewer labels rather than dropped, so they still reach review.
  */
 
-export type EmailFormat = 'medrecruit-digest' | '1medical-table' | '1medical-single';
+export type EmailFormat =
+  'medrecruit-digest' | '1medical-table' | '1medical-single' | '1medical-positions';
 export interface LabelledBlock {
   labelled: string;
   raw: string;
@@ -200,6 +201,8 @@ function block(
 export function detectEmailFormat(parts: EmailParts): EmailFormat | null {
   const from = (parts.from ?? '').toLowerCase();
   const text = toText(parts.text);
+  if (from.includes('1medical') && /^Position:/im.test(text) && /^Dates:/im.test(text))
+    return '1medical-positions';
   const pipeRows = text.split('\n').filter((l) => (l.match(/\|/g) ?? []).length >= 2).length;
   if ((from.includes('medrecruit') || /T&(?:amp;)?A/.test(text)) && pipeRows >= 2)
     return 'medrecruit-digest';
@@ -220,6 +223,7 @@ export function splitRecruiterEmail(format: EmailFormat, input: EmailParts): Lab
   const parts = { ...input, text: toText(input.text) };
   if (format === 'medrecruit-digest') return medrecruitDigest(parts);
   if (format === '1medical-table') return oneMedicalTable(parts);
+  if (format === '1medical-positions') return oneMedicalPositions(parts);
   return oneMedicalSingle(parts);
 }
 
@@ -484,4 +488,54 @@ function oneMedicalSingle({ text }: EmailParts): LabelledBlock[] {
       notes,
     ),
   ];
+}
+
+function oneMedicalPositions({ text, subject }: EmailParts): LabelledBlock[] {
+  const sections = text.split(
+    /(?=^(?:Victoria|New South Wales|Queensland|Tasmania|NSW|QLD|VIC|TAS|NT|SA|WA|ACT)\s*$)/im,
+  );
+  return sections.flatMap((section) => {
+    const role = section.match(/^Position:\s*(.+)$/im)?.[1];
+    if (!role) return [];
+    const state = stateFrom(section.split('\n')[0]);
+    const unit = section.match(/^Unit:\s*(.+)$/im)?.[1];
+    const rateText = section.match(/^Rate:\s*(.+)$/im)?.[1] || '';
+    const rate = singleRate(rateText.replace(/,\s+/g, ','));
+    const roleInfo = classifyRole(role);
+    const ranges = [...section.matchAll(/^Dates:\s*(.+)$/gim)];
+    return ranges.map((range) => {
+      const dates = [...range[1].matchAll(/(\d{2})\.(\d{2})\.(\d{2,4})/g)].map((m) =>
+        iso(Number(m[3]) < 100 ? 2000 + Number(m[3]) : Number(m[3]), Number(m[2]), Number(m[1])),
+      );
+      const asap = /ASAP/i.test(range[1]);
+      const start = !asap && dates.length === 2 ? dates[0] : null;
+      const end = dates.length ? dates[dates.length - 1] : null;
+      const notes = ['Facility is not named; confirm with the recruiter.', ...roleInfo.notes];
+      if (!start) notes.push('Start date needs confirmation.');
+      if (start && end && end < start)
+        notes.push('End date precedes start date; confirm the source dates.');
+      if (!rate) notes.push('Rate needs confirmation.');
+      const raw = section
+        .split(/If you are available|If you are not available|Kind regards/i)[0]
+        .trim();
+      return block(
+        [
+          ['Title', `${role} � ${unit || 'placement'} � ${state || 'location unknown'}`],
+          ['State', state],
+          ['Grade', roleInfo.grade],
+          [
+            'Specialty',
+            /mental health|psychiatr/i.test(subject || '') ? 'Psychiatry' : roleInfo.specialty,
+          ],
+          ['Start', start],
+          ['End', end],
+          ['Rate', rate ? `AUD ${rate.amount}/${rate.unit}` : null],
+          ['Roster', section.match(/^Work schedule:\s*(.+)$/im)?.[1] || null],
+          ['Super', /\+\s*super/i.test(rateText) ? 'additional' : null],
+        ],
+        raw,
+        notes,
+      );
+    });
+  });
 }

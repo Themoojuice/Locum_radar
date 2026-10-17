@@ -215,6 +215,8 @@ export interface Observation {
   snapshot: ListingInput;
 }
 export interface CollectionRun {
+  gmailFindings?: { id: string; title: string; status: 'offer' | 'review'; detail: string }[];
+  gmailSkipped?: number;
   id: string;
   sourceId: string;
   startedAt: string;

@@ -175,3 +175,55 @@ describe('durable collector checkpoints', () => {
     expect(processor).toHaveBeenCalledTimes(2);
   });
 });
+
+it('reports Gmail findings even when already stored and counts skipped messages', async () => {
+  await transaction((s) => {
+    const source = sourceFromRecipe(sourceRecipes.find((r) => r.id === 'gmail-label')!);
+    Object.assign(source, {
+      enabled: true,
+      permission: 'approved',
+      permissionEvidence: 'Test fixture',
+    });
+    source.collector!.gmailMode = 'search';
+    source.collector!.query = 'locum';
+    source.collector!.delayMs = 1000;
+    s.sources = [source];
+  });
+  const offer = candidate(
+    'Registrar offer',
+    'Locum registrar at Example Hospital $180 per hour',
+    'message:0',
+    null,
+    'gmail-label',
+    'email',
+  );
+  offer.emailScreen = { status: 'offer', reason: 'Fixture' };
+  processor
+    .mockResolvedValueOnce({
+      recognised: true,
+      candidates: [],
+      links: [
+        { kind: 'message', url: '/gmail/v1/users/me/messages/1' },
+        { kind: 'message', url: '/gmail/v1/users/me/messages/2' },
+      ],
+    })
+    .mockResolvedValueOnce({ recognised: true, candidates: [offer], links: [] })
+    .mockResolvedValueOnce({ recognised: true, candidates: [], links: [] });
+  const run = await collectSource('gmail-label');
+  expect(run.gmailFindings?.[0].title).toBe('Registrar offer');
+  expect(run.gmailSkipped).toBe(1);
+  await transaction((s) => {
+    delete s.sources[0].crawl;
+    s.sources[0].lastAttempt = null;
+  });
+  processor
+    .mockResolvedValueOnce({
+      recognised: true,
+      candidates: [],
+      links: [{ kind: 'message', url: '/gmail/v1/users/me/messages/1' }],
+    })
+    .mockResolvedValueOnce({ recognised: true, candidates: [offer], links: [] });
+  const repeat = await collectSource('gmail-label');
+  expect(repeat.count).toBe(0);
+  expect(repeat.gmailFindings).toHaveLength(1);
+}, 15000);

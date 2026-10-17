@@ -40,6 +40,7 @@ const commandSchema = z.discriminatedUnion('command', [
     permissionEvidence: z.string().max(3000),
     enabled: z.boolean(),
     collector: collectorConfigSchema.optional(),
+    refreshGmail: z.boolean().optional(),
   }),
   z.object({ command: z.literal('catalog') }),
   z.object({
@@ -216,6 +217,13 @@ export async function POST(request: Request) {
               ))
           )
             throw new Error('Enable only a supported adapter with recorded access permission.');
+          if (body.refreshGmail && body.collector?.kind === 'gmail') {
+            if (source.crawl?.leaseUntil && Date.parse(source.crawl.leaseUntil) > Date.now())
+              throw new Error('Wait for the current Gmail batch to finish');
+            // Explicit refresh bypasses the scheduled interval; an unfinished scan resumes.
+            if (source.crawl?.complete) delete source.crawl;
+            source.lastAttempt = null;
+          }
           if (body.collector?.kind === 'gmail') {
             for (const review of s.reviews.filter(
               (r) => r.sourceId === source.id && r.kind === 'extraction',

@@ -501,6 +501,22 @@ export async function collectSource(sourceId: string) {
             room = Math.max(0, config.maxRecords - next.records);
           const kept = result.candidates.slice(offset, offset + room);
           count = recordCandidates(s, sourceId, kept, new Date().toISOString());
+          if (config.kind === 'gmail' && item.kind === 'message') {
+            record.gmailFindings ??= [];
+            record.gmailFindings.push(
+              ...kept.map((c) => ({
+                id: c.externalId,
+                title: c.title,
+                status:
+                  c.emailScreen?.status === 'offer' ? ('offer' as const) : ('review' as const),
+                detail: [c.extractions[0]?.draft.evidence?.derivedFields, c.text]
+                  .filter(Boolean)
+                  .join('\n\nOriginal excerpt:\n')
+                  .slice(0, 2400),
+              })),
+            );
+            if (!result.candidates.length) record.gmailSkipped = (record.gmailSkipped || 0) + 1;
+          }
           next.newRecords = (next.newRecords || 0) + count;
           next.records += kept.length;
           if (offset + kept.length < result.candidates.length) {
