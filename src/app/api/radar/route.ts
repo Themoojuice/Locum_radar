@@ -61,9 +61,20 @@ export async function GET(request: Request) {
     if (!authenticated(request))
       return NextResponse.json({ error: 'Sign in to access your radar' }, { status: 401 });
     const store = await readStore();
+    const documents = new Map(store.documents.map((d) => [d.id, d]));
+    const reviews = store.reviews.map((r) =>
+      r.publishedAt !== undefined
+        ? r
+        : {
+            ...r,
+            publishedAt:
+              documents.get(r.id.replace(/^acquire-/, '').replace(/-\d+$/, ''))?.publishedAt ??
+              null,
+          },
+    );
     // Evidence versions stay on the server; current review drafts already contain their relevant text.
     return NextResponse.json(
-      { ...store, documents: [], starterAvailable: collectionEnabled() },
+      { ...store, reviews, documents: [], starterAvailable: collectionEnabled() },
       {
         headers: { 'Cache-Control': 'private, no-store' },
       },

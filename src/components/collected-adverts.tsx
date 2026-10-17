@@ -31,6 +31,14 @@ export function PendingJobCard({
           ? `${dateLabel(d.startDate!, true)} – ${dateLabel(d.endDate!, true)}`
           : 'Dates need confirmation'}
       </p>
+      {store.sources.some(
+        (s) => s.id === item.sourceId && (s.type === 'email' || s.collector?.kind === 'gmail'),
+      ) && (
+        <p className="small muted">
+          Email date:{' '}
+          {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString('en-AU') : 'unknown'}
+        </p>
+      )}
       <p className="small muted">
         {store.sources.find((s) => s.id === item.sourceId)?.name || 'Imported advertisement'} ·{' '}
         {d.grade || 'Grade unconfirmed'}

@@ -22,8 +22,8 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
   const [mode, setMode] = useState<'label' | 'search'>(existing?.labelId ? 'label' : 'search'),
     [label, setLabel] = useState(existing?.labelId || ''),
     [query, setQuery] = useState(existing?.gmailMode === 'search' ? existing.query : locumQuery),
-    [allHistory, setAllHistory] = useState(existing?.gmailAllHistory ?? true),
-    [days, setDays] = useState(365);
+    [allHistory, setAllHistory] = useState(existing?.gmailAllHistory ?? false),
+    [days, setDays] = useState(existing?.lookbackDays ?? 30);
   const stop = useRef(false);
   async function refresh() {
     const r = await fetch('/api/gmail', { cache: 'no-store' });
@@ -220,8 +220,10 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
             </button>
           </div>
           <p className="small muted">
-            Large imports resume saved batches. Keep this page open. Up to 50,000 requests / 200,000
-            extracted records per scan; limits and failures are reported explicitly.
+            The default imports the last 30 days. Older email offers are hidden on Discover unless
+            you include older emails. Large imports resume saved batches. Keep this page open. Up to
+            50,000 requests / 200,000 extracted records per scan; limits and failures are reported
+            explicitly.
           </p>
         </>
       )}

@@ -205,7 +205,7 @@ export const sourceRecipes: SourceRecipe[] = [
     name: 'Gmail recruitment label',
     url: 'https://mail.google.com/',
     type: 'email',
-    config: collectorConfigSchema.parse({ kind: 'gmail', maxPages: 200 }),
+    config: collectorConfigSchema.parse({ kind: 'gmail', maxPages: 200, lookbackDays: 30 }),
     qualification:
       'Read-only Gmail import using an explicit selected label or search query. Guided Google setup is available in Sources.',
   },

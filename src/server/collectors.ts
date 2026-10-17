@@ -80,6 +80,7 @@ export function recordCandidates(
           previous.resolved = true;
       }
       store.reviews.push({
+        publishedAt: item.publishedAt,
         observedAt,
         id: 'acquire-' + id + '-' + index,
         kind: 'extraction',

@@ -75,3 +75,17 @@ describe('one master pool', () => {
     expect(jobPool(s)).toHaveLength(2);
   });
 });
+
+import { olderEmail, type PoolItem } from '@/domain/job-pool';
+it('uses original email age rather than import time and keeps undated/public adverts visible', () => {
+  const now = Date.parse('2026-10-17T00:00:00Z');
+  const old = {
+    emailOnly: true,
+    emailDate: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-10-17T00:00:00Z',
+  } as PoolItem;
+  expect(olderEmail(old, now)).toBe(true);
+  expect(olderEmail({ ...old, emailDate: '2026-10-16T00:00:00Z' }, now)).toBe(false);
+  expect(olderEmail({ ...old, emailDate: null }, now)).toBe(false);
+  expect(olderEmail({ ...old, emailOnly: false }, now)).toBe(false);
+});

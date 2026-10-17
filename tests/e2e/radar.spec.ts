@@ -434,7 +434,9 @@ test('Gmail guided import searches all history and drains batches into the board
   await page.goto('/');
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
   await expect(page.getByLabel('Emails to import')).toHaveValue('search');
-  await expect(page.getByLabel('Search all email history')).toBeChecked();
+  await expect(page.getByLabel('Search all email history')).not.toBeChecked();
+  await expect(page.getByLabel('Days to look back')).toHaveValue('30');
+  await page.getByLabel('Search all email history').check();
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('All matching emails processed');
   expect(collected).toBe(2);
@@ -533,4 +535,41 @@ test('public source setup enables and collects without a generic permission form
   await page.getByRole('button', { name: 'Save & collect now' }).click();
   await expect.poll(() => collected).toBe(true);
   expect(configured).toBe(true);
+});
+
+test('old email adverts are hidden by message date and recoverable without hiding public roles', async ({
+  page,
+}) => {
+  const store = emptyStore();
+  for (const [id, sourceId, age] of [
+    ['old', 'email', 60],
+    ['recent', 'email', 2],
+    ['public', 'ochre', 60],
+  ] as const)
+    store.reviews.push({
+      id,
+      sourceId,
+      kind: 'extraction',
+      opportunityId: null,
+      candidateId: null,
+      resolved: false,
+      reason: 'Fixture',
+      rawText: id,
+      draft: { title: id, externalId: id },
+      observedAt: new Date().toISOString(),
+      publishedAt: new Date(Date.now() - age * 86400000).toISOString(),
+    });
+  await page.route('**/api/radar', (r) =>
+    r.fulfill({ json: { ...store, starterAvailable: true } }),
+  );
+  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
+  await page.goto('/');
+  await expect(page.locator('.job-card')).toHaveCount(2);
+  await expect(
+    page
+      .locator('.job-card')
+      .filter({ has: page.getByRole('heading', { name: 'old', exact: true }) }),
+  ).toHaveCount(0);
+  await page.getByLabel('Include emails older than 30 days').check();
+  await expect(page.locator('.job-card')).toHaveCount(3);
 });

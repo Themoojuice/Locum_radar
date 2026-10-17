@@ -13,6 +13,8 @@ export interface PoolItem {
   sources: string[];
   pay: Compensation[];
   updatedAt: string;
+  emailOnly?: boolean;
+  emailDate?: string | null;
   job?: EvaluatedJob;
   review?: ReviewItem;
 }
@@ -20,6 +22,8 @@ export const reviewIdentity = (r: ReviewItem) =>
   `${r.sourceId}:${r.draft?.externalId || r.draft?.url || r.id}`;
 /** One row per known opportunity, or source advert until enough facts exist to reconcile it. */
 export function jobPool(store: Store, jobs = evaluate(store)): PoolItem[] {
+  const emailSource = (id: string) =>
+    store.sources.some((s) => s.id === id && (s.type === 'email' || s.collector?.kind === 'gmail'));
   const items = jobs.map((job) => ({
     id: job.opportunity.id,
     title: job.opportunity.title,
@@ -32,6 +36,21 @@ export function jobPool(store: Store, jobs = evaluate(store)): PoolItem[] {
     sources: [...new Set(job.offers.map((o) => o.sourceId))],
     pay: job.activeOffers.map((o) => o.compensation),
     updatedAt: job.opportunity.lastSeenAt,
+    emailOnly: job.offers.length > 0 && job.offers.every((o) => emailSource(o.sourceId)),
+    emailDate: store.reviews
+      .filter(
+        (r) =>
+          r.publishedAt &&
+          store.listings.some(
+            (l) =>
+              l.opportunityId === job.opportunity.id &&
+              l.sourceId === r.sourceId &&
+              l.externalId === r.draft?.externalId,
+          ),
+      )
+      .map((r) => r.publishedAt!)
+      .sort()
+      .at(-1),
     job,
   })) as PoolItem[];
   const accepted = new Map(
@@ -64,7 +83,9 @@ export function jobPool(store: Store, jobs = evaluate(store)): PoolItem[] {
       text: `${d.title || ''} ${d.facilityName || ''} ${d.town || ''} ${d.rawText || r.rawText || ''}`,
       sources: [r.sourceId],
       pay: d.compensation ? [d.compensation] : [],
-      updatedAt: r.observedAt || '',
+      updatedAt: r.publishedAt || r.observedAt || '',
+      emailOnly: emailSource(r.sourceId),
+      emailDate: r.publishedAt,
       review: r,
     });
   }
@@ -142,4 +163,14 @@ export function poolRate(item: PoolItem, unit: string, source = '') {
     .filter((p) => p.currency === 'AUD' && p.basis === unit && p.amount !== null)
     .map((p) => p.amount!);
   return rates.length ? Math.max(...rates) : -1;
+}
+
+/** Unknown email dates stay visible; importing an old message today never makes it fresh. */
+export function olderEmail(item: PoolItem, now = Date.now()) {
+  return (
+    !!item.emailOnly &&
+    !!item.emailDate &&
+    Number.isFinite(Date.parse(item.emailDate)) &&
+    Date.parse(item.emailDate) < now - 30 * 86400000
+  );
 }

@@ -48,7 +48,7 @@ import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
 import { SourcesView } from './sources-view';
 import { CollectionProgress } from './collection-progress';
 import { PendingJobCard } from './collected-adverts';
-import { jobPool, matchesPool, poolRate } from '@/domain/job-pool';
+import { jobPool, matchesPool, poolRate, olderEmail } from '@/domain/job-pool';
 
 type View =
   'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
@@ -212,6 +212,7 @@ export function RadarApp() {
     [minimumPay, setMinimumPay] = useState(''),
     [payUnit, setPayUnit] = useState('hour'),
     [sort, setSort] = useState('recent');
+  const [includeOlderEmails, setIncludeOlderEmails] = useState(false);
   const [display, setDisplay] = useState<'cards' | 'map'>('cards'),
     [selected, setSelected] = useState<string[]>([]),
     [detail, setDetail] = useState<string | null>(null),
@@ -305,6 +306,7 @@ export function RadarApp() {
     activeReviews.length + jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
   const visiblePool = pool
     .filter((item) => {
+      if (!includeOlderEmails && view !== 'Shortlist' && olderEmail(item)) return false;
       if (view === 'Shortlist' && (!item.job || !shortlist.includes(item.job))) return false;
       if (view !== 'Shortlist' && ['Dismissed', 'Declined'].includes(item.job?.action?.stage || ''))
         return false;
@@ -831,6 +833,19 @@ export function RadarApp() {
                             </select>
                           </label>
                         </div>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={includeOlderEmails}
+                            onChange={(e) => setIncludeOlderEmails(e.target.checked)}
+                          />
+                          Include emails older than 30 days (
+                          {pool.filter((item) => olderEmail(item)).length})
+                        </label>
+                        <p className="small muted">
+                          Email freshness uses the original message date, not the import date.
+                          Unknown dates stay visible; recent email does not guarantee availability.
+                        </p>
                         <p className="small muted">
                           One pool from public boards, connected email and imports. Unknown details
                           stay visible; a minimum rate filters only known AUD rates in the selected

@@ -228,6 +228,7 @@ export interface CollectionRun {
   message: string;
 }
 export interface ReviewItem {
+  publishedAt?: string | null;
   observedAt?: string;
   id: string;
   kind: 'possible duplicate' | 'extraction';
