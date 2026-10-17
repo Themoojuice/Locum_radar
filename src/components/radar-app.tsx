@@ -297,10 +297,17 @@ export function RadarApp() {
   const shortlist = jobs.filter(
     (j) => j.action && !['Discovered', 'Dismissed', 'Declined'].includes(j.action.stage),
   );
-  const pool = useMemo(() => (store ? jobPool(store, jobs) : []), [store, jobs]);
+  const [includeHeldEmails, setIncludeHeldEmails] = useState(false);
+  const pool = useMemo(
+    () => (store ? jobPool(store, jobs, includeHeldEmails) : []),
+    [store, jobs, includeHeldEmails],
+  );
   const activeReviews = (store?.reviews || []).filter(
     (r) =>
-      !r.resolved && (r.kind !== 'extraction' || pool.some((item) => item.review?.id === r.id)),
+      !r.resolved &&
+      (r.kind !== 'extraction' ||
+        (!!r.emailScreen && r.emailScreen.status !== 'offer') ||
+        pool.some((item) => item.review?.id === r.id)),
   );
   const pendingReviews =
     activeReviews.length + jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
@@ -841,6 +848,14 @@ export function RadarApp() {
                           />
                           Include emails older than 30 days (
                           {pool.filter((item) => olderEmail(item)).length})
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={includeHeldEmails}
+                            onChange={(e) => setIncludeHeldEmails(e.target.checked)}
+                          />
+                          Show emails held for screening (not confirmed offers)
                         </label>
                         <p className="small muted">
                           Email freshness uses the original message date, not the import date.

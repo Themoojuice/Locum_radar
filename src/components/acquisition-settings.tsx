@@ -24,6 +24,18 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
     [query, setQuery] = useState(existing?.gmailMode === 'search' ? existing.query : locumQuery),
     [allHistory, setAllHistory] = useState(existing?.gmailAllHistory ?? false),
     [days, setDays] = useState(existing?.lookbackDays ?? 30);
+  const [senders, setSenders] = useState((existing?.gmailSenders || []).join('\n'));
+  const suggestedSenders = [
+    ...new Set(
+      store.reviews
+        .filter((r) => r.sourceId === 'gmail-label' && r.emailScreen?.status === 'review')
+        .map((r) => {
+          const line = (r.rawText || '').match(/^Sender:\s*(.+)$/im)?.[1] || '';
+          return (line.match(/<([^<>]+)>/)?.[1] || line).trim().toLowerCase();
+        })
+        .filter((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)),
+    ),
+  ];
   const stop = useRef(false);
   async function refresh() {
     const r = await fetch('/api/gmail', { cache: 'no-store' });
@@ -100,6 +112,10 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
           gmailMode: mode,
           labelId: mode === 'label' ? label : '',
           query,
+          gmailSenders: senders
+            .split(/[\n,]+/)
+            .map((v) => v.trim())
+            .filter(Boolean),
           gmailAllHistory: allHistory,
           lookbackDays: days,
           maxPages: 50000,
@@ -174,6 +190,49 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
               <input disabled={busy} value={query} onChange={(e) => setQuery(e.target.value)} />
             </label>
           )}
+          <label>
+            Approved recruiter email addresses or domains
+            <textarea
+              disabled={busy}
+              value={senders}
+              onChange={(e) => setSenders(e.target.value)}
+              placeholder="jobs@agency.com.au or @agency.com.au — one per line"
+            />
+          </label>
+          {!!suggestedSenders.length && (
+            <details>
+              <summary>Choose senders from potential offers</summary>
+              <p>Only select recruiters you recognise. Personal contacts can also mention jobs.</p>
+              {suggestedSenders.map((address) => (
+                <label className="checkbox-row" key={address}>
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={senders
+                      .split(/[\n,]+/)
+                      .map((v) => v.trim())
+                      .includes(address)}
+                    onChange={(e) =>
+                      setSenders(
+                        e.target.checked
+                          ? [...senders.split(/[\n,]+/).filter(Boolean), address].join('\n')
+                          : senders
+                              .split(/[\n,]+/)
+                              .filter((v) => v.trim() !== address)
+                              .join('\n'),
+                      )
+                    }
+                  />
+                  {address}
+                </label>
+              ))}
+            </details>
+          )}
+          <p className="small muted">
+            Mailbox searches only place offers from these senders on the board, and still require
+            vacancy details. Other potential offers are held for screening. Alternatively use a
+            recruitment-only label. Sender matching is a filter, not proof of authenticity.
+          </p>
           <label className="checkbox-row">
             <input
               type="checkbox"

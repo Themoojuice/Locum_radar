@@ -15,6 +15,7 @@ import { transaction } from '../database';
 import { configForSource } from '@/domain/source-catalog';
 import { credential, installationKey } from '../credentials';
 import { GmailConnectionError } from '@/domain/gmail-errors';
+import { screenEmail } from '@/domain/email-screening';
 export const gmailScope = 'https://www.googleapis.com/auth/gmail.readonly';
 const tokenFile = () =>
   path.resolve(
@@ -192,6 +193,7 @@ export function parseGmailMessage(
   labelId: string,
   sourceId: string,
   searchMatched = false,
+  approvedSenders: string[] = [],
 ): Candidate[] {
   if (!searchMatched && (!labelId || !message.labelIds?.includes(labelId))) return [];
   const texts: string[] = [],
@@ -223,7 +225,9 @@ export function parseGmailMessage(
     .slice(0, 100);
   if (!parts.length) parts.push('No readable message body. Review the original email.');
   const timestamp = Number(message.internalDate);
-  return parts.map((part, index) => {
+  return parts.flatMap((part, index) => {
+    const screening = screenEmail(subject, part, sender, approvedSenders, !searchMatched);
+    if (screening.status === 'ignore') return [];
     const item = candidate(
       subject,
       `Sender: ${sender}\n${part}`,
@@ -233,6 +237,8 @@ export function parseGmailMessage(
       'email',
       Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : null,
     );
+    item.emailScreen = screening;
+    item.extractions.forEach((e) => e.issues.unshift(screening.reason));
     if (attachments.length)
       item.extractions.forEach((e) =>
         e.issues.unshift(

@@ -5,6 +5,7 @@ import type { CollectorConfig, FrontierItem } from '@/domain/acquisition';
 import { safeUrl } from './transport';
 import { stateFrom, classifyRole } from '../adapters/email-formats';
 export interface Candidate {
+  emailScreen?: import('@/domain/email-screening').EmailScreen;
   externalId: string;
   url: string | null;
   title: string;

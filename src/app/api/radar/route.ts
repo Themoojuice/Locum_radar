@@ -56,6 +56,7 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('resolve'), reviewId: z.string() }),
   z.object({ command: z.literal('delete'), opportunityId: z.string() }),
 ]);
+import { screenStoredEmail } from '@/domain/email-screening';
 export async function GET(request: Request) {
   try {
     if (!authenticated(request))
@@ -215,6 +216,16 @@ export async function POST(request: Request) {
               ))
           )
             throw new Error('Enable only a supported adapter with recorded access permission.');
+          if (body.collector?.kind === 'gmail') {
+            for (const review of s.reviews.filter(
+              (r) => r.sourceId === source.id && r.kind === 'extraction',
+            ))
+              review.emailScreen = screenStoredEmail(
+                review,
+                body.collector.gmailSenders,
+                body.collector.gmailMode === 'label',
+              );
+          }
           Object.assign(source, {
             permission: body.permission,
             permissionEvidence: body.permissionEvidence,

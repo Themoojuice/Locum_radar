@@ -20,6 +20,16 @@ export const collectorConfigSchema = z.object({
   maxRecords: z.number().int().min(1).max(200000).default(500),
   delayMs: z.number().int().min(1000).max(60000).default(1500),
   query: z.string().max(500).default('locum doctor'),
+  gmailSenders: z
+    .array(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .regex(/^(?:[a-z0-9.!#$%&'*+/=?^_`{|}~-]+)?@[a-z0-9.-]+\.[a-z]{2,}$/),
+    )
+    .max(100)
+    .default([]),
   gmailMode: z.enum(['label', 'search']).default('label'),
   gmailAllHistory: z.boolean().default(false),
   labelId: z.string().max(200).default(''),

@@ -21,7 +21,11 @@ export interface PoolItem {
 export const reviewIdentity = (r: ReviewItem) =>
   `${r.sourceId}:${r.draft?.externalId || r.draft?.url || r.id}`;
 /** One row per known opportunity, or source advert until enough facts exist to reconcile it. */
-export function jobPool(store: Store, jobs = evaluate(store)): PoolItem[] {
+export function jobPool(
+  store: Store,
+  jobs = evaluate(store),
+  includeHeldEmails = false,
+): PoolItem[] {
   const emailSource = (id: string) =>
     store.sources.some((s) => s.id === id && (s.type === 'email' || s.collector?.kind === 'gmail'));
   const items = jobs.map((job) => ({
@@ -66,6 +70,7 @@ export function jobPool(store: Store, jobs = evaluate(store)): PoolItem[] {
   }
   for (const [key, r] of latest) {
     if (r.resolved) continue;
+    if (!includeHeldEmails && r.emailScreen && r.emailScreen.status !== 'offer') continue;
     const existing = items.find((i) => i.id === accepted.get(key));
     if (existing) {
       existing.review = r;

@@ -126,6 +126,7 @@ export function pageProcessor(
             config.labelId,
             sourceId,
             config.gmailMode === 'search',
+            config.gmailSenders || [],
           ),
           links: [],
           recognised: true,

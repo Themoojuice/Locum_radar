@@ -20,6 +20,9 @@ export function PendingJobCard({
         <Badge>{d.specialty || 'Specialty unconfirmed'}</Badge>
         <Badge tone="amber">Needs verification</Badge>
       </div>
+      {item.emailScreen && item.emailScreen.status !== 'offer' && (
+        <p className="notice">Held for screening — {item.emailScreen.reason}</p>
+      )}
       <h3>{d.title || 'Recruiter advertisement'}</h3>
       <p>
         {d.facilityName || 'Facility not confirmed'}

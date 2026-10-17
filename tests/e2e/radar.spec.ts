@@ -573,3 +573,30 @@ test('old email adverts are hidden by message date and recoverable without hidin
   await page.getByLabel('Include emails older than 30 days').check();
   await expect(page.locator('.job-card')).toHaveCount(3);
 });
+
+test('screened personal emails stay out of the board until explicitly shown', async ({ page }) => {
+  const store = emptyStore();
+  store.reviews.push({
+    id: 'held-personal',
+    sourceId: 'email',
+    kind: 'extraction',
+    opportunityId: null,
+    candidateId: null,
+    resolved: false,
+    reason: 'Screening fixture',
+    rawText: 'Personal email fixture',
+    draft: { title: 'Personal email fixture' },
+    publishedAt: new Date().toISOString(),
+    emailScreen: { status: 'ignore', reason: 'No medical vacancy evidence' },
+  });
+  await page.route('**/api/radar', (r) =>
+    r.fulfill({ json: { ...store, starterAvailable: true } }),
+  );
+  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Import from Gmail', exact: true })).toBeVisible();
+  await expect(page.locator('.job-card')).toHaveCount(0);
+  await page.getByLabel('Show emails held for screening').check();
+  await expect(page.locator('.job-card')).toHaveCount(1);
+  await expect(page.locator('.job-card')).toContainText('Held for screening');
+});

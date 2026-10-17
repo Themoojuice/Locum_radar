@@ -228,6 +228,7 @@ export interface CollectionRun {
   message: string;
 }
 export interface ReviewItem {
+  emailScreen?: import('./email-screening').EmailScreen;
   publishedAt?: string | null;
   observedAt?: string;
   id: string;
