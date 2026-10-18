@@ -2441,3 +2441,28 @@ input[type='number'] {
   border: 1px solid #cbd5d1;
   border-radius: 8px;
 }
+
+/* Collection and browsing belong to the same Discover workspace. */
+.acquisition-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.acquisition-grid > .panel {
+  min-width: 0;
+}
+.acquisition-grid .collection-heading {
+  flex-wrap: wrap;
+}
+.acquisition-grid .collection-heading .button-row {
+  flex-wrap: wrap;
+}
+#source-settings > summary {
+  cursor: pointer;
+}
+@media (max-width: 1100px) {
+  .acquisition-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -45,6 +45,7 @@ import { ProfileForm } from './profile-form';
 import { ImportDialog } from './import-dialog';
 import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
+import { GmailConnection } from './acquisition-settings';
 import { SourcesView } from './sources-view';
 import { CollectionProgress } from './collection-progress';
 import { PendingJobCard } from './collected-adverts';
@@ -200,6 +201,7 @@ export function RadarApp() {
     [loaded, setLoaded] = useState(false),
     [loginRequired, setLoginRequired] = useState(false),
     [hasPassword, setHasPassword] = useState(false);
+  const [sourceSettingsOpen, setSourceSettingsOpen] = useState(false);
   const [view, setView] = useState<View>('Discover'),
     [search, setSearch] = useState(''),
     [specialty, setSpecialty] = useState(''),
@@ -257,10 +259,10 @@ export function RadarApp() {
         if (active) {
           setLive(value);
           if (new URLSearchParams(window.location.search).has('gmail')) {
-            setView('Sources');
+            setView('Discover');
             setToast(
               new URLSearchParams(window.location.search).get('gmail') === 'connected'
-                ? 'Gmail connected. Choose your emails and press Import from Gmail.'
+                ? 'Gmail connected. Search the last 30 days from Discover.'
                 : 'Google connection was not completed. Check the setup details and try again.',
             );
           }
@@ -347,7 +349,14 @@ export function RadarApp() {
     setEligibility('all');
   }
   function navigate(name: View) {
-    setView(name);
+    setView(name === 'Sources' ? 'Discover' : name);
+    if (name === 'Sources') {
+      setSourceSettingsOpen(true);
+      setTimeout(
+        () => document.getElementById('source-settings')?.scrollIntoView({ behavior: 'smooth' }),
+        0,
+      );
+    }
     setMenuOpen(false);
   }
   async function action(id: string, stage: Stage, notes: string) {
@@ -513,7 +522,7 @@ export function RadarApp() {
               onClick={() => navigate(name)}
             >
               <Icon size={19} />
-              <span>{name}</span>
+              <span>{name === 'Sources' ? 'Source settings' : name}</span>
               {name === 'Shortlist' && shortlist.length > 0 && <b>{shortlist.length}</b>}
               {name === 'Compare' && selected.length > 0 && <b>{selected.length}</b>}
               {name === 'Review queue' && pendingReviews > 0 && <b>{pendingReviews}</b>}
@@ -632,12 +641,12 @@ export function RadarApp() {
                       <h1>
                         {view === 'Shortlist'
                           ? 'The ones worth a closer look.'
-                          : 'Find your next chapter.'}
+                          : 'Find your next locum job.'}
                       </h1>
                       <p>
                         {view === 'Shortlist'
                           ? 'Your saved opportunities and the next steps that make them happen.'
-                          : 'Meaningful work. Better places. A clearer picture of what’s out there.'}
+                          : 'Public boards and recruiter emails, together in one searchable job list.'}
                       </p>
                     </div>
                     <div className="button-row">
@@ -646,7 +655,19 @@ export function RadarApp() {
                         Export
                       </button>
                       {!demo && (
-                        <button className="button secondary" onClick={() => navigate('Sources')}>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            setView('Discover');
+                            setTimeout(
+                              () =>
+                                document
+                                  .getElementById('gmail-import')
+                                  ?.scrollIntoView({ behavior: 'smooth' }),
+                              0,
+                            );
+                          }}
+                        >
                           Import from Gmail
                         </button>
                       )}
@@ -656,72 +677,91 @@ export function RadarApp() {
                       </button>
                     </div>
                   </div>
-                  <div className="stats-grid">
-                    <div className="stat">
-                      <span>
-                        Observed opportunities
-                        <Compass size={17} />
-                      </span>
-                      <strong>
-                        {pool.length}
-                        <small>{demo ? 'illustrative examples' : 'across all sources'}</small>
-                      </strong>
-                      <p>{store.listings.length} advertisements, reconciled</p>
+                  <details className="panel">
+                    <summary>Workspace overview: {pool.length} opportunities</summary>
+                    <div className="stats-grid">
+                      <div className="stat">
+                        <span>
+                          Observed opportunities
+                          <Compass size={17} />
+                        </span>
+                        <strong>
+                          {pool.length}
+                          <small>{demo ? 'illustrative examples' : 'across all sources'}</small>
+                        </strong>
+                        <p>{store.listings.length} advertisements, reconciled</p>
+                      </div>
+                      <div className="stat">
+                        <span>
+                          Suitable matches
+                          <Check size={17} />
+                        </span>
+                        <strong>
+                          {jobs.filter((j) => j.rankable).length}
+                          <small>match your profile</small>
+                        </strong>
+                        <p>Eligibility comes before preference</p>
+                      </div>
+                      <div className="stat">
+                        <span>
+                          Worth verifying
+                          <ShieldQuestion size={17} />
+                        </span>
+                        <strong>
+                          {
+                            pool.filter(
+                              (item) =>
+                                !item.job || item.job.eligibility.status === 'Needs verification',
+                            ).length
+                          }
+                          <small>need a closer look</small>
+                        </strong>
+                        <button className="text-button" onClick={() => navigate('Review queue')}>
+                          Open review queue <ArrowRight size={13} />
+                        </button>
+                      </div>
+                      <div className="stat">
+                        <span>
+                          Source visibility
+                          <Radio size={17} />
+                        </span>
+                        <strong>
+                          {store.sources.filter((s) => s.lastSuccess).length}
+                          <small>sources collected</small>
+                        </strong>
+                        <button className="text-button" onClick={() => navigate('Sources')}>
+                          {demo ? 'Example records only' : 'See coverage & gaps'}{' '}
+                          <ArrowRight size={13} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="stat">
-                      <span>
-                        Suitable matches
-                        <Check size={17} />
-                      </span>
-                      <strong>
-                        {jobs.filter((j) => j.rankable).length}
-                        <small>match your profile</small>
-                      </strong>
-                      <p>Eligibility comes before preference</p>
-                    </div>
-                    <div className="stat">
-                      <span>
-                        Worth verifying
-                        <ShieldQuestion size={17} />
-                      </span>
-                      <strong>
-                        {
-                          pool.filter(
-                            (item) =>
-                              !item.job || item.job.eligibility.status === 'Needs verification',
-                          ).length
-                        }
-                        <small>need a closer look</small>
-                      </strong>
-                      <button className="text-button" onClick={() => navigate('Review queue')}>
-                        Open review queue <ArrowRight size={13} />
-                      </button>
-                    </div>
-                    <div className="stat">
-                      <span>
-                        Source visibility
-                        <Radio size={17} />
-                      </span>
-                      <strong>
-                        {store.sources.filter((s) => s.lastSuccess).length}
-                        <small>sources collected</small>
-                      </strong>
-                      <button className="text-button" onClick={() => navigate('Sources')}>
-                        {demo ? 'Example records only' : 'See coverage & gaps'}{' '}
-                        <ArrowRight size={13} />
-                      </button>
-                    </div>
+                  </details>
+                  <div className="acquisition-grid">
+                    {view === 'Discover' && (
+                      <CollectionProgress
+                        knownCount={pool.length}
+                        demo={demo}
+                        reload={reload}
+                        onSettings={() => {
+                          setDemo(false);
+                          navigate('Sources');
+                        }}
+                      />
+                    )}
+                    {view === 'Discover' && !demo && (
+                      <GmailConnection store={store} reload={reload} />
+                    )}
                   </div>
                   {view === 'Discover' && (
-                    <CollectionProgress
-                      knownCount={pool.length}
-                      demo={demo}
-                      reload={reload}
-                      onSettings={() => {
-                        setDemo(false);
-                        navigate('Sources');
-                      }}
-                    />
+                    <details
+                      className="panel"
+                      id="source-settings"
+                      open={sourceSettingsOpen}
+                      onToggle={(e) => setSourceSettingsOpen(e.currentTarget.open)}
+                    >
+                      <summary>Source settings: connect or fix a source</summary>
+                      <SourcesView store={store} demo={demo} reload={reload} notify={setToast} />
+                    </details>
                   )}
                   {!demo && store.profile.registration === 'unknown' && (
                     <div className="onboarding-note">
@@ -1174,9 +1214,7 @@ export function RadarApp() {
                   onSave={saveProfile}
                 />
               )}
-              {view === 'Sources' && (
-                <SourcesView store={store} demo={demo} reload={reload} notify={setToast} />
-              )}
+
               {view === 'Review queue' && (
                 <>
                   <div className="page-intro">

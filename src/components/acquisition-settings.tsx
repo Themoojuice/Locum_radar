@@ -99,7 +99,7 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
   async function collect(recent = false) {
     setFindings([]);
     setSkipped(0);
-    setMessage('Searching Gmail� results appear here after each small batch.');
+    setMessage('Searching Gmail· results appear here after each small batch.');
     const approved = senders
       .split(/[\n,]+/)
       .map((v) => v.trim())
@@ -164,17 +164,18 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
   }
   return (
     <section className="panel" id="gmail-import">
-      <h2>Import from Gmail</h2>
-      <p>
-        Find potential locum offers and add them to your Discover board as each batch finishes.
-        Choose your recruitment label or search matching emails across your mailbox, including
-        archived mail.
-      </p>
+      <h2>Recruiter emails</h2>
       <p className="small muted">
-        Read-only access: no messages are sent, changed or deleted. Broad searches can include
-        non-job messages. Attachments are flagged for review; their contents are not imported.
+        Search recent recruiter emails. Offers join the job list below; uncertain matches stay in
+        review.
       </p>
-      {!status?.configured && <ProviderSetup kind="gmail" onSaved={() => void refresh()} />}
+      {!status && <p className="small muted">Checking Gmail connection...</p>}
+      {status && !status.configured && (
+        <details>
+          <summary>Connect Gmail</summary>
+          <ProviderSetup kind="gmail" onSaved={() => void refresh()} />
+        </details>
+      )}
       {status?.configured && !status.connected && (
         <button className="button primary" disabled={busy} onClick={() => connect('POST')}>
           Connect Gmail with Google
@@ -187,119 +188,133 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
             disabled={busy || (mode === 'label' ? !label : !query.trim())}
             onClick={() => collect(true)}
           >
-            Search Gmail � last 30 days
+            Search Gmail — last 30 days
           </button>
           <p className="small muted">
             Uses your selected label, or searches approved recruiters when supplied (otherwise your
             search below). Older emails are excluded.
           </p>
-          <label>
-            Emails to import
-            <select
-              value={mode}
-              disabled={busy}
-              onChange={(e) => setMode(e.target.value as 'label' | 'search')}
-            >
-              <option value="search">Search all mail for possible locum offers</option>
-              <option value="label">Only my selected recruitment label</option>
-            </select>
-          </label>
-          {mode === 'label' ? (
+          <details>
+            <summary>Gmail settings: approved recruiters and search options</summary>
             <label>
-              Gmail label
+              Emails to import
               <select
-                aria-label="Gmail label"
+                value={mode}
                 disabled={busy}
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
+                onChange={(e) => setMode(e.target.value as 'label' | 'search')}
               >
-                <option value="">Choose a label</option>
-                {(status.labels || []).map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
+                <option value="search">Search all mail for possible locum offers</option>
+                <option value="label">Only my selected recruitment label</option>
               </select>
             </label>
-          ) : (
+            {mode === 'label' ? (
+              <label>
+                Gmail label
+                <select
+                  aria-label="Gmail label"
+                  disabled={busy}
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                >
+                  <option value="">Choose a label</option>
+                  {(status.labels || []).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label>
+                Gmail search
+                <input disabled={busy} value={query} onChange={(e) => setQuery(e.target.value)} />
+              </label>
+            )}
             <label>
-              Gmail search
-              <input disabled={busy} value={query} onChange={(e) => setQuery(e.target.value)} />
-            </label>
-          )}
-          <label>
-            Approved recruiter email addresses or domains
-            <textarea
-              disabled={busy}
-              value={senders}
-              onChange={(e) => setSenders(e.target.value)}
-              placeholder="jobs@agency.com.au or @agency.com.au — one per line"
-            />
-          </label>
-          {!!suggestedSenders.length && (
-            <details>
-              <summary>Choose senders from potential offers</summary>
-              <p>Only select recruiters you recognise. Personal contacts can also mention jobs.</p>
-              {suggestedSenders.map((address) => (
-                <label className="checkbox-row" key={address}>
-                  <input
-                    type="checkbox"
-                    disabled={busy}
-                    checked={senders
-                      .split(/[\n,]+/)
-                      .map((v) => v.trim())
-                      .includes(address)}
-                    onChange={(e) =>
-                      setSenders(
-                        e.target.checked
-                          ? [...senders.split(/[\n,]+/).filter(Boolean), address].join('\n')
-                          : senders
-                              .split(/[\n,]+/)
-                              .filter((v) => v.trim() !== address)
-                              .join('\n'),
-                      )
-                    }
-                  />
-                  {address}
-                </label>
-              ))}
-            </details>
-          )}
-          <p className="small muted">
-            Mailbox searches only place offers from these senders on the board, and still require
-            vacancy details. Other potential offers are held for screening. Alternatively use a
-            recruitment-only label. Sender matching is a filter, not proof of authenticity.
-          </p>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={allHistory}
-              onChange={(e) => setAllHistory(e.target.checked)}
-            />
-            Search all email history
-          </label>
-          {!allHistory && (
-            <label>
-              Days to look back
-              <input
-                type="number"
-                min="1"
-                max="365"
-                value={days}
+              Approved recruiter email addresses or domains
+              <textarea
                 disabled={busy}
-                onChange={(e) => setDays(Number(e.target.value))}
+                value={senders}
+                onChange={(e) => setSenders(e.target.value)}
+                placeholder="jobs@agency.com.au or @agency.com.au — one per line"
               />
             </label>
-          )}
+            {!!suggestedSenders.length && (
+              <details>
+                <summary>Choose senders from potential offers</summary>
+                <p>
+                  Only select recruiters you recognise. Personal contacts can also mention jobs.
+                </p>
+                {suggestedSenders.map((address) => (
+                  <label className="checkbox-row" key={address}>
+                    <input
+                      type="checkbox"
+                      disabled={busy}
+                      checked={senders
+                        .split(/[\n,]+/)
+                        .map((v) => v.trim())
+                        .includes(address)}
+                      onChange={(e) =>
+                        setSenders(
+                          e.target.checked
+                            ? [...senders.split(/[\n,]+/).filter(Boolean), address].join('\n')
+                            : senders
+                                .split(/[\n,]+/)
+                                .filter((v) => v.trim() !== address)
+                                .join('\n'),
+                        )
+                      }
+                    />
+                    {address}
+                  </label>
+                ))}
+              </details>
+            )}
+            <p className="small muted">
+              Mailbox searches only place offers from these senders on the board, and still require
+              vacancy details. Other potential offers are held for screening. Alternatively use a
+              recruitment-only label. Sender matching is a filter, not proof of authenticity.
+            </p>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={allHistory}
+                onChange={(e) => setAllHistory(e.target.checked)}
+              />
+              Search all email history
+            </label>
+            {!allHistory && (
+              <label>
+                Days to look back
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={days}
+                  disabled={busy}
+                  onChange={(e) => setDays(Number(e.target.value))}
+                />
+              </label>
+            )}
+            <div className="button-row">
+              <button
+                className="button primary"
+                disabled={busy || (mode === 'label' ? !label : !query.trim())}
+                onClick={() => collect()}
+              >
+                Search with custom settings
+              </button>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => connect('DELETE')}
+              >
+                Disconnect Gmail
+              </button>
+            </div>
+          </details>
           <div className="button-row">
-            <button
-              className="button primary"
-              disabled={busy || (mode === 'label' ? !label : !query.trim())}
-              onClick={() => collect()}
-            >
-              Search with custom settings
-            </button>
             {busy && (
               <button
                 className="button secondary"
@@ -311,16 +326,7 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
                 Pause import
               </button>
             )}
-            <button className="button secondary" disabled={busy} onClick={() => connect('DELETE')}>
-              Disconnect Gmail
-            </button>
           </div>
-          <p className="small muted">
-            The default imports the last 30 days. Older email offers are hidden on Discover unless
-            you include older emails. Large imports resume saved batches. Keep this page open. Up to
-            50,000 requests / 200,000 extracted records per scan; limits and failures are reported
-            explicitly.
-          </p>
         </>
       )}
       {status?.configured && !status.connected && (
@@ -336,8 +342,8 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
         <section aria-label="Gmail scan results">
           <h3>Results from this scan</h3>
           <p aria-live="polite">
-            {findings.filter((f) => f.status === 'offer').length} offers �{' '}
-            {findings.filter((f) => f.status === 'review').length} held for review � {skipped}{' '}
+            {findings.filter((f) => f.status === 'offer').length} offers ·{' '}
+            {findings.filter((f) => f.status === 'review').length} held for review · {skipped}{' '}
             messages skipped
           </p>
           <p className="small muted">
@@ -348,7 +354,7 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
             {findings.map((f) => (
               <details key={f.id} className="panel">
                 <summary>
-                  {f.status === 'offer' ? 'Offer' : 'Held for review'} � {f.title}
+                  {f.status === 'offer' ? 'Offer' : 'Held for review'} · {f.title}
                 </summary>
                 <p style={{ whiteSpace: 'pre-wrap' }}>{f.detail}</p>
               </details>

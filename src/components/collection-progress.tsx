@@ -248,12 +248,11 @@ export function CollectionProgress({
       <div className="collection-heading">
         <div>
           <p className="eyebrow">
-            <Radio size={14} /> YOUR SEARCH COVERAGE
+            <Radio size={14} /> JOB BOARD UPDATES
           </p>
-          <h2>Which sources have been checked?</h2>
+          <h2>Find jobs from connected sources</h2>
           <p className="small muted">
-            Your real workspace’s collection history. Imported advertisements do not count as a
-            scrape.
+            New results appear in the job list below as each batch finishes.
           </p>
         </div>
         <div className="button-row">
@@ -301,26 +300,10 @@ export function CollectionProgress({
       </div>
       {plan && (
         <>
-          <div className="collection-counts">
-            <span>
-              <strong>
-                {plan.checked} / {plan.sources.length}
-              </strong>{' '}
-              successfully checked
-            </span>
-            <span>
-              <strong>{plan.neverChecked}</strong> never successfully checked
-            </span>
-            <span>
-              <strong>{plan.ready}</strong> ready to search
-            </span>
-            <span>
-              <strong>{plan.waiting}</strong> waiting for refresh
-            </span>
-            <span>
-              <strong>{plan.setup}</strong> need setup
-            </span>
-          </div>
+          <p className="small muted">
+            {plan.checked} sources checked / {plan.sources.length} available; {plan.ready} ready to
+            search; {plan.setup} optional sources need setup
+          </p>
           {!plan.enabled && (
             <p className="small">
               Automatic collection is switched off on this installation. Manage sources to see what
@@ -333,17 +316,6 @@ export function CollectionProgress({
               example jobs.
             </p>
           )}
-          <p className="small muted">
-            All connected sources feed the same job board below, including email. New results appear
-            as each batch completes. Enabled sources refresh when due while Discover is open.
-          </p>
-          <p className="small muted">
-            Fetching first loads the hospital directory and any exported recruiter emails, then
-            checks enabled sources that are due. Generic page, feed and Gmail collectors resume
-            saved batches. Agency-specific adapters check new listings within their own limits.
-            Partial results remain visible; a finished scan never means every possible vacancy is
-            covered. Keep this tab open while fetching.
-          </p>
           <details className="collection-details">
             <summary>View all {plan.sources.length} sources and remaining work</summary>
             <div className="collection-rows">

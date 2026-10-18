@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Activity, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Activity, ExternalLink, RefreshCw } from 'lucide-react';
 import type { Source, Store } from '@/domain/model';
 import { api, Badge, Modal } from './shared';
 import { jobPool } from '@/domain/job-pool';
@@ -8,7 +8,7 @@ import { sourceSetup } from '@/domain/source-setup';
 import { ProviderSetup } from './provider-setup';
 import { configForSource } from '@/domain/source-catalog';
 import { collectorConfigSchema } from '@/domain/acquisition';
-import { CollectorSettings, GmailConnection } from './acquisition-settings';
+import { CollectorSettings } from './acquisition-settings';
 export function SourcesView({
   store,
   demo,
@@ -71,22 +71,10 @@ export function SourcesView({
   }
   return (
     <>
-      <div className="page-intro">
-        <p className="eyebrow">KNOW YOUR BLIND SPOTS</p>
-        <h1>A clear view of your sources.</h1>
-        <p>
-          Public visibility, access permission, collector support and current vacancies are tracked
-          separately.
-        </p>
-      </div>
-      <div className="notice">
-        <ShieldCheck size={18} />
-        <span>
-          Start with Gmail or a public board. Each source explains what it needs and whether its
-          collector has worked. A source with no successful run is <strong>not yet verified</strong>
-          .
-        </span>
-      </div>
+      <p>
+        Every connected source adds jobs to the list below. Open a source to change its settings or
+        fix a connection.
+      </p>
       {progress && (
         <div className="panel" role="status">
           {progress}
@@ -138,7 +126,7 @@ export function SourcesView({
             </div>
           </section>
         )}
-        {!demo && <GmailConnection store={store} reload={reload} />}
+
         {store.sources.map((source) => {
           const offers = store.offers.filter((o) => o.sourceId === source.id),
             unique = new Set(offers.map((o) => o.opportunityId)).size,

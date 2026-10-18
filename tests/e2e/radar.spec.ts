@@ -112,10 +112,12 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByText('Opening your private workspace…')).not.toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Find your next chapter.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Find your next locum job.' })).toBeVisible();
   await expect(page.getByText('Fictional vacancies and a sample doctor profile.')).toBeVisible();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
-  await expect(coverage.getByText('0 / 14', { exact: true })).toBeVisible();
+  await expect(
+    coverage.getByText('0 sources checked / 14 available', { exact: false }),
+  ).toBeVisible();
   await expect(coverage.getByRole('button', { name: 'Fetch active vacancies' })).toBeDisabled();
   await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
   await expect(coverage.getByText('Medrecruit', { exact: true })).toBeVisible();
@@ -357,7 +359,10 @@ test('source catalog exposes label-only Gmail setup and saves a custom feed', as
   await expect(page.getByText('Opening your private workspace…')).not.toBeVisible();
   if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
-  await page.getByRole('navigation').getByRole('button', { name: 'Sources', exact: true }).click();
+  await page
+    .getByRole('navigation')
+    .getByRole('button', { name: 'Source settings', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Add / update collector recipes' }).click();
   await expect(
     page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }),
@@ -433,12 +438,17 @@ test('Gmail guided import searches all history and drains batches into the board
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page
+    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
+    .click();
   await expect(page.getByLabel('Emails to import')).toHaveValue('search');
   await expect(page.getByLabel('Search all email history')).not.toBeChecked();
   await expect(page.getByLabel('Days to look back')).toHaveValue('30');
   await page.getByLabel('Search all email history').check();
   await page.getByRole('button', { name: 'Search with custom settings', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('All matching emails processed');
+  await expect(page.locator('#gmail-import').getByRole('status')).toContainText(
+    'All matching emails processed',
+  );
   expect(collected).toBe(2);
   expect(settings?.enabled).toBe(true);
   expect(settings?.collector).toMatchObject({
@@ -481,6 +491,7 @@ test('Google setup saves credentials through a form without exposing them in sta
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page.getByText('Connect Gmail', { exact: true }).click();
   await page
     .getByLabel('Google client ID', { exact: true })
     .fill('fixture.apps.googleusercontent.com');
@@ -526,7 +537,7 @@ test('public source setup enables and collects without a generic permission form
     return route.fulfill({ json: { ok: true } });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page.getByRole('button', { name: 'Manage sources', exact: true }).click();
   const source = page
     .locator('.source-card')
     .filter({ has: page.getByRole('heading', { name: 'Medrecruit', exact: true }) });
@@ -624,7 +635,7 @@ test('Gmail quick search overrides all-history and streams batch findings', asyn
           gmailFindings: [
             {
               id: 'fixture',
-              title: 'Registrar � Example Hospital',
+              title: 'Registrar · Example Hospital',
               status: 'offer',
               detail: '$180 per hour',
             },
@@ -635,11 +646,14 @@ test('Gmail quick search overrides all-history and streams batch findings', asyn
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
+  await page
+    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
+    .click();
   await page.getByLabel('Approved recruiter email addresses or domains').fill('@1medical.com.au');
   await page.getByLabel('Search all email history').check();
-  await page.getByRole('button', { name: 'Search Gmail � last 30 days', exact: true }).click();
+  await page.getByRole('button', { name: 'Search Gmail — last 30 days', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
-    'Registrar � Example Hospital',
+    'Registrar · Example Hospital',
   );
   await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
     '2 messages skipped',
@@ -650,4 +664,18 @@ test('Gmail quick search overrides all-history and streams batch findings', asyn
     query: '{from:1medical.com.au} -in:trash -in:spam',
   });
   expect(saved?.refreshGmail).toBe(true);
+  await expect(page.getByRole('region', { name: 'Opportunity filters' })).toBeVisible();
+  await page
+    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
+    .click();
+  await page
+    .getByRole('navigation')
+    .getByRole('button', { name: 'Source settings', exact: true })
+    .click();
+  await expect(page.locator('#source-settings')).toHaveAttribute('open', '');
+  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText('Registrar');
+  await page.locator('#source-settings > summary').click();
+  await expect(page.getByRole('region', { name: 'Opportunity filters' })).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'test-results/unified-discover.png', fullPage: true });
 });
