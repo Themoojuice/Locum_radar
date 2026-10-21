@@ -27,6 +27,7 @@ import {
   LogOut,
   Menu,
   Bell,
+  Mail,
 } from 'lucide-react';
 import { demoStore } from '@/domain/seed';
 import {
@@ -47,14 +48,23 @@ import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
 import { GmailConnection } from './acquisition-settings';
 import { SourcesView } from './sources-view';
+import { RecruiterInbox } from './recruiter-inbox';
 import { CollectionProgress } from './collection-progress';
 import { PendingJobCard } from './collected-adverts';
 import { jobPool, matchesPool, poolRate, olderEmail } from '@/domain/job-pool';
 
 type View =
-  'Discover' | 'Shortlist' | 'Compare' | 'Calendar' | 'Review queue' | 'Sources' | 'My profile';
+  | 'Discover'
+  | 'Inbox'
+  | 'Shortlist'
+  | 'Compare'
+  | 'Calendar'
+  | 'Review queue'
+  | 'Sources'
+  | 'My profile';
 const nav = [
   { name: 'Discover', icon: Compass },
+  { name: 'Inbox', icon: Mail },
   { name: 'Shortlist', icon: Bookmark },
   { name: 'Compare', icon: Columns3 },
   { name: 'Calendar', icon: CalendarDays },
@@ -202,6 +212,7 @@ export function RadarApp() {
     [loginRequired, setLoginRequired] = useState(false),
     [hasPassword, setHasPassword] = useState(false);
   const [sourceSettingsOpen, setSourceSettingsOpen] = useState(false);
+  const [inboxAuto, setInboxAuto] = useState(false);
   const [view, setView] = useState<View>('Discover'),
     [search, setSearch] = useState(''),
     [specialty, setSpecialty] = useState(''),
@@ -311,6 +322,9 @@ export function RadarApp() {
         (!!r.emailScreen && r.emailScreen.status !== 'offer') ||
         pool.some((item) => item.review?.id === r.id)),
   );
+  const newOffers = (store?.inbox ?? []).filter(
+    (e) => e.status === 'new' && e.vacancies.some((v) => !v.ended),
+  ).length;
   const pendingReviews =
     activeReviews.length + jobs.filter((j) => j.eligibility.status === 'Needs verification').length;
   const visiblePool = pool
@@ -522,7 +536,14 @@ export function RadarApp() {
               onClick={() => navigate(name)}
             >
               <Icon size={19} />
-              <span>{name === 'Sources' ? 'Source settings' : name}</span>
+              <span>
+                {name === 'Sources'
+                  ? 'Source settings'
+                  : name === 'Inbox'
+                    ? 'Recruiter inbox'
+                    : name}
+              </span>
+              {name === 'Inbox' && newOffers > 0 && <b>{newOffers}</b>}
               {name === 'Shortlist' && shortlist.length > 0 && <b>{shortlist.length}</b>}
               {name === 'Compare' && selected.length > 0 && <b>{selected.length}</b>}
               {name === 'Review queue' && pendingReviews > 0 && <b>{pendingReviews}</b>}
@@ -749,7 +770,14 @@ export function RadarApp() {
                       />
                     )}
                     {view === 'Discover' && !demo && (
-                      <GmailConnection store={store} reload={reload} />
+                      <GmailConnection
+                        store={store}
+                        reload={reload}
+                        onOpenInbox={() => {
+                          setInboxAuto(true);
+                          navigate('Inbox');
+                        }}
+                      />
                     )}
                   </div>
                   {view === 'Discover' && (
@@ -1192,6 +1220,22 @@ export function RadarApp() {
                   </div>
                 </>
               )}
+              {view === 'Inbox' && (
+                <RecruiterInbox
+                  store={store}
+                  demo={demo}
+                  reload={reload}
+                  notify={setToast}
+                  onFix={(draft) => openImport(draft)}
+                  onOpen={setDetail}
+                  onLeaveDemo={() => {
+                    changeMode(false);
+                    setView('Inbox');
+                  }}
+                  autoStart={inboxAuto}
+                  onAutoStarted={() => setInboxAuto(false)}
+                />
+              )}
               {view === 'Compare' && (
                 <ComparisonView
                   jobs={jobs.filter((j) => selected.includes(j.opportunity.id))}
@@ -1376,6 +1420,10 @@ export function RadarApp() {
             await reload();
             setDemo(false);
             setEligibility('all');
+            if (view === 'Inbox') {
+              setToast('Added to your feed.');
+              return;
+            }
             setView('Discover');
             setToast('Advertisements imported. Unknown requirements remain in the review queue.');
           }}

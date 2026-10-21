@@ -37,6 +37,7 @@ const tables = [
   ['collection_runs', 'runs', ', source_id TEXT NOT NULL REFERENCES sources(id)'],
   ['review_queue', 'reviews', ''],
   ['acquisition_documents', 'documents', ', source_id TEXT NOT NULL REFERENCES sources(id)'],
+  ['inbox_emails', 'inbox', ''],
 ] as const;
 const globals = globalThis as unknown as {
   radarSqlite?: DatabaseSync;

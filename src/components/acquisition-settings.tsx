@@ -9,7 +9,16 @@ import { useRef } from 'react';
 import { gmailErrorMessage } from '@/domain/gmail-errors';
 const locumQuery =
   '{locum locums "locum tenens" "doctor vacancy" "medical vacancy" "registrar cover"} -in:trash -in:spam';
-export function GmailConnection({ store, reload }: { store: Store; reload: () => Promise<void> }) {
+export function GmailConnection({
+  store,
+  reload,
+  onOpenInbox,
+}: {
+  store: Store;
+  reload: () => Promise<void>;
+  /** Opens the recruiter inbox and starts an import. */
+  onOpenInbox?: () => void;
+}) {
   const existing = store.sources.find((s) => s.id === 'gmail-label')?.collector;
   const [status, setStatus] = useState<{
       configured: boolean;
@@ -183,17 +192,31 @@ export function GmailConnection({ store, reload }: { store: Store; reload: () =>
       )}
       {status?.connected && (
         <>
-          <button
-            className="button primary"
-            disabled={busy || (mode === 'label' ? !label : !query.trim())}
-            onClick={() => collect(true)}
-          >
-            Search Gmail — last 30 days
-          </button>
-          <p className="small muted">
-            Uses your selected label, or searches approved recruiters when supplied (otherwise your
-            search below). Older emails are excluded.
-          </p>
+          {onOpenInbox && (
+            <>
+              <button className="button primary" disabled={busy} onClick={onOpenInbox}>
+                Import offers — last 30 days
+              </button>
+              <p className="small muted">
+                Reads Medrecruit and 1Medical emails and lists their vacancies in the Recruiter
+                inbox. Complete ones join the job list.
+              </p>
+            </>
+          )}
+          <details>
+            <summary>Generic Gmail search (other recruiters or a label)</summary>
+            <button
+              className="button secondary"
+              disabled={busy || (mode === 'label' ? !label : !query.trim())}
+              onClick={() => collect(true)}
+            >
+              Search Gmail — last 30 days
+            </button>
+            <p className="small muted">
+              Uses your selected label, or searches approved recruiters when supplied (otherwise
+              your search below). Results need review.
+            </p>
+          </details>
           <details>
             <summary>Gmail settings: approved recruiters and search options</summary>
             <label>

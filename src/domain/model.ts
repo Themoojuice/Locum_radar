@@ -256,6 +256,8 @@ export interface Store {
   runs: CollectionRun[];
   reviews: ReviewItem[];
   documents: import('./acquisition').AcquisitionDocument[];
+  /** Recruiter emails read from Gmail, one record per email. */
+  inbox: import('./inbox').InboxEmail[];
 }
 export const defaultProfile: Profile = {
   name: 'My profile',

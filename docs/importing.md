@@ -43,6 +43,27 @@ Other labelled fields include `Credentials` (comma-separated), `Paid days`, `Pai
 
 Preserve an agency's stable listing ID. The same source and ID update one listing and preserve earlier versions. If no ID exists, the parser uses a content fingerprint; amended text then counts as a new source record until reconciled.
 
+## Recruiter inbox (Gmail)
+
+Open **Recruiter inbox** in the sidebar (or press **Import offers** in the Gmail panel on Discover) and press **Import offers**. The app searches Gmail, read-only, for
+
+```
+from:(medrecruit.com OR 1medical.com.au) newer_than:30d -in:trash -in:spam -in:sent -in:drafts
+```
+
+and reads each email once (choose 7–90 days). There is no daily interval, approved-sender list or label to set up. Every email is kept as one record and classified:
+
+- **Offers**: vacancies were read from the email. Layouts read: the Medrecruit weekly digest (`Town ROLE | dates | rate` under state headings), 1Medical's seven-column table, 1Medical `Position: / Unit: / Dates: / Rate:` blocks, "_Hospital_ in _State_ are seeking…" prose, and single-hospital campaigns with shift lists or rosters (OFF days skipped).
+- **Jobs on linked page**: for example Medrecruit's weekly "hot jobs" link.
+- **Check email**: looks like an offer (grade, hiring words, pay or dates) but no dated vacancy could be read, for example a permanent post.
+- **Not a job offer**: newsletters, AHPRA reminders, admin notices. These are collapsed at the bottom.
+
+Each vacancy shows hospital and state, specialty and grade, dates and length (or the list of shifts), the pay as written plus a comparable figure, super, travel and accommodation, and the email line it came from. Years missing from the email are inferred from the email's send date and noted. A vacancy that names its hospital, state, grade and dates is added to the job feed straight away (source "Recruiter email imports"). The same vacancy repeated in later weekly emails updates the one feed entry. Vacancies missing a detail (often the hospital, which 1Medical blocks leave out) show **Add hospital**; this opens the review form prefilled from the email, and the saved job is linked back to the email.
+
+Medrecruit digests name towns rather than hospitals. Towns are matched to the hospital directory where the match is unambiguous, and each match is noted for checking.
+
+Re-reading: only new emails are read on each import. Use **Re-read all** after an update to the reader. Emails can be hidden from the Emails tab. **Clear old drafts** resolves review items left by the earlier generic Gmail search.
+
 ## Reviewing and correcting
 
 The primary fields have ordinary form controls. The expandable full-record editor exposes all remuneration, credential and provenance fields; it is intended for advanced corrections and structured imports. `null` means unknown. Read the original text underneath. Validation errors identify the field to fix.

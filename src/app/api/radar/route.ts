@@ -12,6 +12,14 @@ import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
 import { sourceAdapters } from '@/server/adapters/registry';
 import { collectionEnabled } from '@/server/public-starter';
+import {
+  INBOX_BATCH,
+  clearLegacyGmailReviews,
+  fetchEmails,
+  listInboxIds,
+  saveEmail,
+  unreadIds,
+} from '@/server/email/inbox';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -56,8 +64,27 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('split'), listingId: z.string() }),
   z.object({ command: z.literal('resolve'), reviewId: z.string() }),
   z.object({ command: z.literal('delete'), opportunityId: z.string() }),
+  z.object({
+    command: z.literal('inbox-list'),
+    days: z.number().int().min(1).max(365),
+    reread: z.boolean().optional(),
+  }),
+  z.object({
+    command: z.literal('inbox-read'),
+    ids: z
+      .array(z.string().regex(/^[\w-]{6,64}$/))
+      .min(1)
+      .max(INBOX_BATCH),
+  }),
+  z.object({
+    command: z.literal('inbox-status'),
+    ids: z.array(z.string()).min(1).max(500),
+    status: z.enum(['new', 'seen', 'dismissed']),
+  }),
+  z.object({ command: z.literal('inbox-clear-legacy') }),
 ]);
 import { screenStoredEmail } from '@/domain/email-screening';
+import { linkInboxImports } from '@/domain/inbox';
 export async function GET(request: Request) {
   try {
     if (!authenticated(request))
@@ -117,8 +144,37 @@ export async function POST(request: Request) {
       requestStop();
       return NextResponse.json({ ok: true });
     }
+    if (body.command === 'inbox-list') {
+      const ids = await listInboxIds(body.days);
+      const todo = unreadIds(await readStore(), ids, body.reread);
+      return NextResponse.json({ total: ids.length, ids: todo });
+    }
+    if (body.command === 'inbox-read') {
+      // Gmail is read before the database transaction so the store is never locked on the network.
+      const raws = await fetchEmails(body.ids);
+      return NextResponse.json(
+        await transaction((s) => {
+          let added = 0,
+            vacancies = 0,
+            offers = 0;
+          for (const raw of raws) {
+            const saved = saveEmail(s, raw);
+            added += saved.added;
+            vacancies += saved.email.vacancies.length;
+            if (saved.email.kind === 'offers') offers++;
+          }
+          return { read: raws.length, offers, vacancies, added };
+        }),
+      );
+    }
     const result = await transaction((s) => {
       switch (body.command) {
+        case 'inbox-status': {
+          for (const e of s.inbox) if (body.ids.includes(e.id)) e.status = body.status;
+          return { ok: true };
+        }
+        case 'inbox-clear-legacy':
+          return { cleared: clearLegacyGmailReviews(s) };
         case 'catalog': {
           for (const recipe of sourceRecipes) {
             const existing = s.sources.find((v) => v.id === recipe.id);
@@ -188,6 +244,13 @@ export async function POST(request: Request) {
         }
         case 'import': {
           const results = body.listings.map((l) => ingest(s, l));
+          linkInboxImports(
+            s.inbox,
+            body.listings.map((l, i) => ({
+              externalId: l.externalId,
+              opportunityId: results[i].opportunityId,
+            })),
+          );
           if (body.reviewId) {
             const r = s.reviews.find((r) => r.id === body.reviewId);
             if (r) r.resolved = true;

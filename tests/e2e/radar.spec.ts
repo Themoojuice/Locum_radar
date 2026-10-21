@@ -651,6 +651,7 @@ test('Gmail quick search overrides all-history and streams batch findings', asyn
     .click();
   await page.getByLabel('Approved recruiter email addresses or domains').fill('@1medical.com.au');
   await page.getByLabel('Search all email history').check();
+  await page.getByText('Generic Gmail search (other recruiters or a label)').click();
   await page.getByRole('button', { name: 'Search Gmail — last 30 days', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
     'Registrar · Example Hospital',
@@ -678,4 +679,116 @@ test('Gmail quick search overrides all-history and streams batch findings', asyn
   await expect(page.getByRole('region', { name: 'Opportunity filters' })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/unified-discover.png', fullPage: true });
+});
+
+test('recruiter inbox imports offers in batches and lists their vacancies', async ({ page }) => {
+  const store = emptyStore();
+  const commands: string[] = [];
+  const email = {
+    id: 'msg-fixture-1',
+    threadId: 't1',
+    agency: 'Medrecruit',
+    recruiter: 'Jo Example',
+    fromAddress: 'info@connect.medrecruit.com',
+    subject: 'RMO Jobs This Week!',
+    receivedAt: '2026-10-19T23:00:00.000Z',
+    kind: 'offers',
+    summary: '2 vacancies read.',
+    permanent: false,
+    body: 'Wattleford MED RMO | 29 Jan–5 Feb | $150 p/h',
+    links: [],
+    gmailUrl: 'https://mail.google.com/mail/u/0/#all/msg-fixture-1',
+    parser: 3,
+    importedAt: '2026-10-21T00:00:00.000Z',
+    status: 'new',
+    vacancies: [
+      {
+        id: 'msg-fixture-1-0',
+        hospital: 'Wattleford Hospital',
+        town: 'Wattleford',
+        state: 'NSW',
+        role: 'MED RMO',
+        specialty: 'General medicine',
+        grade: 'RMO',
+        start: '2099-01-29',
+        end: '2099-02-05',
+        dateText: '29 Jan–5 Feb',
+        blocks: [],
+        rateText: '$150 p/h',
+        amount: 150,
+        basis: 'hour',
+        super: 'unknown',
+        roster: '',
+        flights: 'unknown',
+        accommodation: 'unknown',
+        positions: null,
+        minPgy: null,
+        excerpt: 'NSW · Wattleford · MED RMO | 29 Jan–5 Feb | $150 p/h',
+        notes: [],
+        missing: [],
+        opportunityId: 'opp-1',
+        ended: false,
+      },
+      {
+        id: 'msg-fixture-1-1',
+        hospital: '',
+        town: '',
+        state: 'QLD',
+        role: 'PHO – Community',
+        specialty: 'Psychiatry',
+        grade: 'PHO',
+        start: '2099-03-01',
+        end: '2099-04-01',
+        dateText: '01.03.99 - 01.04.99',
+        blocks: [],
+        rateText: '$1,025 per day',
+        amount: 1025,
+        basis: 'day',
+        super: 'unknown',
+        roster: '',
+        flights: 'included',
+        accommodation: 'included',
+        positions: null,
+        minPgy: null,
+        excerpt: 'Position: PHO · Unit: Community',
+        notes: ['The email names the state and unit, not the hospital.'],
+        missing: ['hospital'],
+        opportunityId: null,
+        ended: false,
+      },
+    ],
+  };
+  let imported = false;
+  await page.route('**/api/gmail', (r) =>
+    r.fulfill({ json: { configured: true, connected: true, labels: [] } }),
+  );
+  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
+  await page.route('**/api/radar', async (r) => {
+    if (r.request().method() === 'GET')
+      return r.fulfill({
+        json: { ...store, inbox: imported ? [email] : [], starterAvailable: false },
+      });
+    const body = r.request().postDataJSON();
+    commands.push(body.command);
+    if (body.command === 'inbox-list')
+      return r.fulfill({ json: { total: 1, ids: ['msg-fixture-1'] } });
+    if (body.command === 'inbox-read') {
+      imported = true;
+      return r.fulfill({ json: { read: 1, offers: 1, vacancies: 2, added: 1 } });
+    }
+    return r.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page
+    .getByRole('button', { name: /open my workspace/i })
+    .first()
+    .click();
+  await page.getByRole('button', { name: /Recruiter inbox/ }).click();
+  await page.getByRole('button', { name: 'Import offers' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Read 1 of 1' })).toBeVisible();
+  expect(commands).toEqual(['inbox-list', 'inbox-read']);
+  await expect(page.getByText('Wattleford Hospital')).toBeVisible();
+  await expect(page.getByRole('button', { name: /In feed/ })).toBeVisible();
+  await page.getByRole('button', { name: /Add hospital/ }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });

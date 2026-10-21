@@ -2466,3 +2466,533 @@ input[type='number'] {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ------------------------------------------------------------ recruiter inbox */
+.inbox .page-heading {
+  margin-bottom: 20px;
+}
+.inbox-import {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px 20px;
+  align-items: center;
+}
+.inbox-import > :not(.inbox-import-main):not(.inbox-import-actions) {
+  grid-column: 1 / -1;
+}
+.inbox-import-main {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.inbox-import-main h2 {
+  margin: 0 0 2px;
+}
+.inbox-import-main p {
+  margin: 0;
+}
+.inbox-import-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #e9f1e4;
+  color: var(--green);
+}
+.inbox-import-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.inbox-days select {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+}
+.inbox-progress p {
+  margin: 8px 0 0;
+}
+.inbox-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #edf0e9;
+  overflow: hidden;
+}
+.inbox-bar span {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.inbox-bar span.running {
+  background: linear-gradient(90deg, var(--green) 0%, #4d8b69 50%, var(--green) 100%);
+  background-size: 200% 100%;
+  animation: inbox-shimmer 1.4s linear infinite;
+}
+@keyframes inbox-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.inbox-legacy {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  background: #fffaf0;
+  border-color: #f0dfbd;
+  color: #865b16;
+}
+.inbox-legacy p {
+  margin: 0;
+  flex: 1;
+}
+.inbox-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  margin-bottom: 18px;
+}
+.inbox-stats > div {
+  padding: 14px 20px;
+  border-left: 1px solid var(--line);
+}
+.inbox-stats > div:first-child {
+  border-left: 0;
+}
+.inbox-stats strong {
+  display: block;
+  font: 400 28px/1.1 var(--serif);
+  color: var(--forest);
+}
+.inbox-stats strong small {
+  font-size: 15px;
+  color: var(--muted);
+}
+.inbox-stats span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.inbox-stats .attention strong {
+  color: #a26a17;
+}
+.inbox-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.inbox-toolbar select {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+}
+.inbox-toolbar .checkbox-row {
+  margin: 0;
+}
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 8px;
+  background: #e8ede5;
+}
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.segmented button.active {
+  background: #fff;
+  color: var(--forest);
+  box-shadow: 0 1px 2px rgb(23 63 50 / 12%);
+}
+.segmented b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--forest);
+  color: #fff;
+  font-size: 10px;
+  line-height: 18px;
+}
+.inbox-search {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--muted);
+}
+.inbox-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.vacancy-month {
+  margin: 22px 0 8px;
+  font: 400 15px/1.2 var(--serif);
+  color: #64836b;
+}
+.vacancy-list > div:first-child .vacancy-month {
+  margin-top: 4px;
+}
+.vacancy-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.vacancy-row:hover,
+.vacancy-row.expanded {
+  border-color: #c9d4c1;
+  box-shadow: 0 2px 8px rgb(23 63 50 / 6%);
+}
+.vacancy-row.ended {
+  opacity: 0.55;
+}
+.vacancy-summary {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 120px 92px;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 6px 12px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.vacancy-summary strong {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+}
+.vacancy-summary small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.vacancy-when strong {
+  font-size: 12px;
+}
+.vacancy-what strong {
+  font: 400 16px/1.25 var(--serif);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vacancy-what strong em,
+.ev-place em {
+  margin-left: 7px;
+  font: 600 10px/1 var(--sans);
+  font-style: normal;
+  letter-spacing: 0.8px;
+  color: #64836b;
+}
+.vacancy-role {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.vacancy-pay strong {
+  font-size: 15px;
+  color: var(--forest);
+}
+.vacancy-perks {
+  display: inline-flex;
+  gap: 4px;
+  vertical-align: -2px;
+  color: var(--green);
+}
+.vacancy-source strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.vacancy-status {
+  padding-right: 14px;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.status-pill.in-feed {
+  background: #e9f1e4;
+  color: #35623d;
+}
+.status-pill.in-feed:hover {
+  border-color: #b9d1b0;
+}
+.status-pill.needs {
+  background: #fff0d8;
+  color: #865b16;
+}
+.status-pill.needs:hover {
+  border-color: #e7c88f;
+}
+.vacancy-detail {
+  grid-column: 1 / -1;
+  padding: 4px 16px 16px;
+  border-top: 1px dashed var(--line);
+}
+.vacancy-detail blockquote {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 3px solid #cfdcc6;
+  background: var(--paper);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.vacancy-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 20px;
+  margin: 0 0 10px;
+}
+.vacancy-detail dt {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.vacancy-detail dd {
+  margin: 0;
+  font-size: 12px;
+}
+.vacancy-notes {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #865b16;
+}
+.vacancy-from {
+  margin: 0;
+}
+.email-list > .button-row {
+  margin-bottom: 10px;
+}
+.email-card {
+  position: relative;
+  margin-bottom: 12px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.email-card.unread {
+  border-left: 3px solid var(--green);
+}
+.email-card header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.email-card h3 {
+  margin: 2px 0 6px;
+  font: 400 17px/1.3 var(--serif);
+}
+.email-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.email-meta strong {
+  color: var(--ink);
+}
+.unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.email-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+.email-vacancies {
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.email-vacancies li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 150px 110px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef1ea;
+  font-size: 12px;
+}
+.ev-place {
+  font-weight: 600;
+}
+.ev-role {
+  color: var(--muted);
+}
+.ev-when small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.ev-pay {
+  font-weight: 600;
+  color: var(--forest);
+}
+.email-body summary,
+.other-emails summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.email-body pre {
+  max-height: 420px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--paper);
+  font: 12px/1.55 var(--sans);
+  white-space: pre-wrap;
+}
+.other-emails {
+  padding: 14px 18px;
+}
+.other-emails[open] summary {
+  margin-bottom: 12px;
+}
+@media (max-width: 1060px) {
+  .vacancy-summary {
+    grid-template-columns: 130px minmax(0, 1fr) 110px;
+  }
+  .vacancy-source {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .inbox-import {
+    grid-template-columns: 1fr;
+  }
+  .inbox-import-actions {
+    flex-wrap: wrap;
+  }
+  .inbox-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .inbox-stats > div:nth-child(3) {
+    border-left: 0;
+  }
+  .inbox-stats > div:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+  .vacancy-row {
+    grid-template-columns: 1fr;
+  }
+  .vacancy-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 12px 14px 4px;
+  }
+  .vacancy-what {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .vacancy-what strong {
+    white-space: normal;
+  }
+  .vacancy-pay {
+    text-align: right;
+  }
+  .vacancy-status {
+    padding: 0 14px 12px;
+  }
+  .email-vacancies li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ev-role,
+  .ev-when {
+    grid-column: 1;
+  }
+}
+.inbox-toolbar select,
+.inbox-days select {
+  width: auto;
+}
+.inbox-days,
+.inbox-toolbar label {
+  margin: 0;
+}
+.inbox-toolbar .inbox-search {
+  flex-direction: row;
+  gap: 8px;
+}
+.inbox-search input,
+.inbox-search input:focus-visible {
+  width: auto;
+  border: 0;
+  outline: 0;
+  padding: 9px 0;
+}
+.inbox-search:focus-within {
+  outline: 3px solid #b37c2b;
+  outline-offset: 2px;
+}
+.vacancy-summary {
+  grid-template-columns: 150px minmax(0, 1fr) 150px 92px;
+}
+.email-more {
+  margin-top: 6px;
+}
+@media (max-width: 760px) {
+  .inbox-toolbar select {
+    flex: 1 1 140px;
+  }
+}
+@media (min-width: 761px) {
+  .vacancy-status {
+    width: 150px;
+    text-align: right;
+  }
+}
