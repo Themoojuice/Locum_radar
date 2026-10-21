@@ -4,18 +4,18 @@ import { listingInputSchema } from '../../src/domain/model';
 import { emptyStore } from '../../src/domain/seed';
 import { collectionPlan } from '../../src/domain/collection';
 
-test('public starter runs without setup and collected adverts appear without inventing a facility', async ({
+test('agency feed runs without setup and collected adverts appear without inventing a facility', async ({
   page,
 }) => {
   const store = emptyStore();
   Object.assign(
-    store.sources.find((s) => s.id === 'ochre')!,
+    store.sources.find((s) => s.id === 'medrecruit')!,
     { enabled: true, permission: 'approved', permissionEvidence: 'Fixture' },
   );
   store.reviews.push({
     id: 'public-fixture',
     kind: 'extraction',
-    sourceId: 'ochre',
+    sourceId: 'medrecruit',
     opportunityId: null,
     candidateId: null,
     resolved: false,
@@ -23,7 +23,7 @@ test('public starter runs without setup and collected adverts appear without inv
     rawText: 'Public locum advert',
     draft: {
       title: 'Public ED registrar fixture',
-      url: 'https://ochrerecruitment.com/job/fixture',
+      url: 'https://medrecruit.medworld.com/jobs/fixture',
       externalId: 'fixture',
       state: 'NT',
       startDate: '2027-01-01',
@@ -116,13 +116,13 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
   await expect(page.getByText('Fictional vacancies and a sample doctor profile.')).toBeVisible();
   const coverage = page.getByRole('region', { name: 'Source collection progress' });
   await expect(
-    coverage.getByText('0 sources checked / 14 available', { exact: false }),
+    coverage.getByText('0 sources checked / 4 available', { exact: false }),
   ).toBeVisible();
   await expect(coverage.getByRole('button', { name: 'Fetch active vacancies' })).toBeDisabled();
-  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
+  await coverage.getByText('View all 4 sources and remaining work', { exact: true }).click();
   await expect(coverage.getByText('Medrecruit', { exact: true })).toBeVisible();
-  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(14);
-  await coverage.getByText('View all 14 sources and remaining work', { exact: true }).click();
+  await expect(coverage.getByText('Not successfully scraped yet', { exact: true })).toHaveCount(4);
+  await coverage.getByText('View all 4 sources and remaining work', { exact: true }).click();
   await page.screenshot({ path: 'test-results/radar-desktop.png', fullPage: true });
   await page.getByRole('textbox', { name: 'Search opportunities' }).fill('Cairns');
   await expect(page.locator('.job-card')).toHaveCount(1);
@@ -165,7 +165,7 @@ test('example workspace: filter, compare, inspect unknowns and navigate', async 
 
 test('bulk search attempts every ready source and continues after a failure', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'wavelength'].includes(s.id))) {
     source.enabled = true;
     source.permission = 'approved';
     source.permissionEvidence = 'Mock only';
@@ -195,7 +195,7 @@ test('bulk search attempts every ready source and continues after a failure', as
   await expect(coverage.getByRole('status')).toContainText(
     '2 of 2 attempted · 1 succeeded · 0 partial · 1 failed',
   );
-  expect(attempted).toEqual(['medrecruit', 'ochre']);
+  expect(attempted).toEqual(['medrecruit', 'wavelength']);
   await expect(
     coverage.getByText('Medrecruit (failed: Fixture failure)', { exact: true }),
   ).toBeVisible();
@@ -262,7 +262,7 @@ test('real workspace: import two sources, preserve offers, save notes and reload
 
 test('bulk search can stop after the active source without starting another', async ({ page }) => {
   const store = emptyStore();
-  for (const source of store.sources.filter((s) => ['medrecruit', 'ochre'].includes(s.id))) {
+  for (const source of store.sources.filter((s) => ['medrecruit', 'wavelength'].includes(s.id))) {
     Object.assign(source, {
       enabled: true,
       permission: 'approved',
@@ -354,116 +354,6 @@ test('Discover drains resumable batches and reports a limited source as partial'
   expect(batches).toBe(2);
 });
 
-test('source catalog exposes label-only Gmail setup and saves a custom feed', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByText('Opening your private workspace…')).not.toBeVisible();
-  if (await page.getByRole('button', { name: 'Open my workspace', exact: true }).isVisible())
-    await page.getByRole('button', { name: 'Open my workspace', exact: true }).click();
-  await page
-    .getByRole('navigation')
-    .getByRole('button', { name: 'Source settings', exact: true })
-    .click();
-  await page.getByRole('button', { name: 'Add / update collector recipes' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }),
-  ).toBeVisible();
-  const installed = await (await page.request.get('/api/radar')).json();
-  for (const id of ['medrecruit', '1medical', 'wavelength', 'adzuna']) {
-    expect(installed.sources.find((source: { id: string }) => source.id === id).method).toBe(
-      'json-api',
-    );
-  }
-  const gmail = page
-    .locator('.source-card')
-    .filter({ has: page.getByRole('heading', { name: 'Gmail recruitment label', exact: true }) });
-  await gmail.getByRole('button', { name: 'Set up source' }).click();
-  await page.getByText('Advanced page and search settings', { exact: true }).click();
-  await expect(page.getByLabel('Import only this Gmail label')).toHaveValue('');
-  await expect(page.getByLabel('Maximum pages / messages per scan')).toHaveValue('200');
-  await page.screenshot({ path: 'test-results/gmail-settings.png' });
-  await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('button', { name: 'Add a custom source' }).click();
-  await page.getByLabel('Source name', { exact: true }).fill('Fixture feed');
-  await page
-    .getByLabel('Starting URLs (one per line)')
-    .fill('https://example.com/jobs.xml\nhttps://example.com/other.xml');
-  await page.getByLabel('Allowed website hosts (one per line)').fill('example.com');
-  await page.getByRole('button', { name: 'Add source', exact: true }).click();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
-  const feed = page
-    .locator('.source-card')
-    .filter({ has: page.getByRole('heading', { name: 'Fixture feed', exact: true }) });
-  await feed.getByRole('button', { name: 'Set up source' }).click();
-  await page.getByText('Advanced page and search settings', { exact: true }).click();
-  await expect(page.getByLabel('Starting URLs (one per line)')).toHaveValue(
-    'https://example.com/jobs.xml\nhttps://example.com/other.xml',
-  );
-  await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.screenshot({ path: 'test-results/acquisition-sources.png' });
-});
-
-test('Gmail guided import searches all history and drains batches into the board', async ({
-  page,
-}) => {
-  const store = emptyStore();
-  let collected = 0;
-  let settings: Record<string, unknown> | undefined;
-  await page.route('**/api/gmail', (route) =>
-    route.fulfill({
-      json: {
-        configured: true,
-        connected: true,
-        labels: [{ id: 'Label_jobs', name: 'Recruitment' }],
-      },
-    }),
-  );
-  await page.route('**/api/collection', (route) =>
-    route.fulfill({ json: collectionPlan(store, false) }),
-  );
-  await page.route('**/api/radar', async (route) => {
-    if (route.request().method() === 'GET')
-      return route.fulfill({ json: { ...store, starterAvailable: true } });
-    const body = route.request().postDataJSON();
-    if (body.command === 'source') settings = body;
-    if (body.command === 'collect') {
-      collected++;
-      return route.fulfill({
-        json:
-          collected === 1
-            ? { status: 'partial', remaining: 1, message: 'First email imported' }
-            : { status: 'success', remaining: 0, message: 'All matching emails processed' },
-      });
-    }
-    return route.fulfill({ json: { ok: true } });
-  });
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
-  await page
-    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
-    .click();
-  await expect(page.getByLabel('Emails to import')).toHaveValue('search');
-  await expect(page.getByLabel('Search all email history')).not.toBeChecked();
-  await expect(page.getByLabel('Days to look back')).toHaveValue('30');
-  await page.getByLabel('Search all email history').check();
-  await page.getByRole('button', { name: 'Search with custom settings', exact: true }).click();
-  await expect(page.locator('#gmail-import').getByRole('status')).toContainText(
-    'All matching emails processed',
-  );
-  expect(collected).toBe(2);
-  expect(settings?.enabled).toBe(true);
-  expect(settings?.collector).toMatchObject({
-    kind: 'gmail',
-    gmailMode: 'search',
-    gmailAllHistory: true,
-    labelId: '',
-  });
-  await page.getByLabel('Emails to import').selectOption('label');
-  await page.getByLabel('Gmail label', { exact: true }).selectOption('Label_jobs');
-  await page.getByRole('button', { name: 'Search with custom settings', exact: true }).click();
-  await expect
-    .poll(() => settings?.collector)
-    .toMatchObject({ gmailMode: 'label', labelId: 'Label_jobs' });
-});
 test('Google setup saves credentials through a form without exposing them in status', async ({
   page,
 }) => {
@@ -491,13 +381,12 @@ test('Google setup saves credentials through a form without exposing them in sta
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
-  await page.getByText('Connect Gmail', { exact: true }).click();
   await page
     .getByLabel('Google client ID', { exact: true })
     .fill('fixture.apps.googleusercontent.com');
   await page.getByLabel('Google client secret', { exact: true }).fill('fixture-secret');
   await page.getByRole('button', { name: 'Save connection settings' }).click();
-  await expect(page.getByRole('button', { name: 'Connect Gmail with Google' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Connect Gmail', exact: true })).toBeEnabled();
   expect(saved).toEqual({
     GMAIL_CLIENT_ID: 'fixture.apps.googleusercontent.com',
     GMAIL_CLIENT_SECRET: 'fixture-secret',
@@ -505,9 +394,7 @@ test('Google setup saves credentials through a form without exposing them in sta
   await expect(page.locator('body')).not.toContainText('fixture-secret');
 });
 
-test('public source setup enables and collects without a generic permission form', async ({
-  page,
-}) => {
+test('an agency feed switches on and collects without a permission form', async ({ page }) => {
   const store = emptyStore();
   let configured = false;
   let collected = false;
@@ -541,9 +428,7 @@ test('public source setup enables and collects without a generic permission form
   const source = page
     .locator('.source-card')
     .filter({ has: page.getByRole('heading', { name: 'Medrecruit', exact: true }) });
-  await source.getByRole('button', { name: 'Set up source' }).click();
-  await expect(page.getByRole('dialog')).toContainText('no login or API key');
-  await page.getByRole('button', { name: 'Save & collect now' }).click();
+  await source.getByLabel('Check Medrecruit automatically').click();
   await expect.poll(() => collected).toBe(true);
   expect(configured).toBe(true);
 });
@@ -610,75 +495,6 @@ test('screened personal emails stay out of the board until explicitly shown', as
   await page.getByLabel('Show emails held for screening').check();
   await expect(page.locator('.job-card')).toHaveCount(1);
   await expect(page.locator('.job-card')).toContainText('Held for screening');
-});
-
-test('Gmail quick search overrides all-history and streams batch findings', async ({ page }) => {
-  const store = emptyStore();
-  let saved: Record<string, unknown> | undefined;
-  await page.route('**/api/gmail', (r) =>
-    r.fulfill({ json: { configured: true, connected: true, labels: [] } }),
-  );
-  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
-  await page.route('**/api/radar', async (r) => {
-    if (r.request().method() === 'GET')
-      return r.fulfill({ json: { ...store, starterAvailable: true } });
-    const body = r.request().postDataJSON();
-    if (body.command === 'source') saved = body;
-    if (body.command === 'collect')
-      return r.fulfill({
-        json: {
-          status: 'success',
-          message: 'Scan finished',
-          count: 1,
-          remaining: 0,
-          gmailSkipped: 2,
-          gmailFindings: [
-            {
-              id: 'fixture',
-              title: 'Registrar · Example Hospital',
-              status: 'offer',
-              detail: '$180 per hour',
-            },
-          ],
-        },
-      });
-    return r.fulfill({ json: { ok: true } });
-  });
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Import from Gmail', exact: true }).click();
-  await page
-    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
-    .click();
-  await page.getByLabel('Approved recruiter email addresses or domains').fill('@1medical.com.au');
-  await page.getByLabel('Search all email history').check();
-  await page.getByText('Generic Gmail search (other recruiters or a label)').click();
-  await page.getByRole('button', { name: 'Search Gmail — last 30 days', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
-    'Registrar · Example Hospital',
-  );
-  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText(
-    '2 messages skipped',
-  );
-  expect(saved?.collector).toMatchObject({
-    gmailAllHistory: false,
-    lookbackDays: 30,
-    query: '{from:1medical.com.au} -in:trash -in:spam',
-  });
-  expect(saved?.refreshGmail).toBe(true);
-  await expect(page.getByRole('region', { name: 'Opportunity filters' })).toBeVisible();
-  await page
-    .getByText('Gmail settings: approved recruiters and search options', { exact: true })
-    .click();
-  await page
-    .getByRole('navigation')
-    .getByRole('button', { name: 'Source settings', exact: true })
-    .click();
-  await expect(page.locator('#source-settings')).toHaveAttribute('open', '');
-  await expect(page.getByRole('region', { name: 'Gmail scan results' })).toContainText('Registrar');
-  await page.locator('#source-settings > summary').click();
-  await expect(page.getByRole('region', { name: 'Opportunity filters' })).toBeVisible();
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: 'test-results/unified-discover.png', fullPage: true });
 });
 
 test('recruiter inbox imports offers in batches and lists their vacancies', async ({ page }) => {
@@ -771,24 +587,58 @@ test('recruiter inbox imports offers in batches and lists their vacancies', asyn
     const body = r.request().postDataJSON();
     commands.push(body.command);
     if (body.command === 'inbox-list')
-      return r.fulfill({ json: { total: 1, ids: ['msg-fixture-1'] } });
+      return r.fulfill({ json: { total: 1, ids: imported ? [] : ['msg-fixture-1'] } });
     if (body.command === 'inbox-read') {
       imported = true;
       return r.fulfill({ json: { read: 1, offers: 1, vacancies: 2, added: 1 } });
     }
     return r.fulfill({ json: { ok: true } });
   });
+  // Opening the workspace imports new recruiter emails in the background.
   await page.goto('/');
-  await page
-    .getByRole('button', { name: /open my workspace/i })
-    .first()
-    .click();
+  await expect.poll(() => commands.slice(0, 2)).toEqual(['inbox-list', 'inbox-read']);
+  await expect(page.getByRole('region', { name: 'Recruiter inbox' })).toContainText(
+    '2 current vacancies',
+  );
   await page.getByRole('button', { name: /Recruiter inbox/ }).click();
-  await page.getByRole('button', { name: 'Import offers' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Read 1 of 1' })).toBeVisible();
-  expect(commands).toEqual(['inbox-list', 'inbox-read']);
   await expect(page.getByText('Wattleford Hospital')).toBeVisible();
   await expect(page.getByRole('button', { name: /In feed/ })).toBeVisible();
+  // A manual import reads only new emails.
+  await page.getByRole('button', { name: 'Import offers' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'already read' })).toBeVisible();
   await page.getByRole('button', { name: /Add hospital/ }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('a pasted advert is read by Claude into the inbox', async ({ page }) => {
+  const store = emptyStore();
+  const pasted: Record<string, unknown>[] = [];
+  await page.route('**/api/gmail', (r) =>
+    r.fulfill({ json: { configured: true, connected: false, labels: [] } }),
+  );
+  await page.route('**/api/setup', (r) =>
+    r.fulfill({ json: { configured: { ANTHROPIC_API_KEY: true }, redirectUri: '' } }),
+  );
+  await page.route('**/api/collection', (r) => r.fulfill({ json: collectionPlan(store, false) }));
+  await page.route('**/api/radar', async (r) => {
+    if (r.request().method() === 'GET')
+      return r.fulfill({ json: { ...store, starterAvailable: true } });
+    const body = r.request().postDataJSON();
+    if (body.command === 'inbox-paste') {
+      pasted.push(body);
+      return r.fulfill({
+        json: { id: 'paste-1', kind: 'offers', vacancies: 1, added: 1, summary: '', cost: 0.001 },
+      });
+    }
+    return r.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Add an advert' }).first().click();
+  await page
+    .getByLabel('Advert text')
+    .fill('Mackay Base ED SRMO 3–17 Jan, $165/hr + super, flights and accom provided');
+  await page.getByRole('button', { name: 'Read it' }).click();
+  await expect.poll(() => pasted.length).toBe(1);
+  expect(pasted[0]).toMatchObject({ text: expect.stringContaining('Mackay Base'), images: [] });
+  await expect(page.getByText('1 vacancy read; 1 added to your feed.')).toBeVisible();
 });

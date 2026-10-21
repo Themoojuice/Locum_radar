@@ -3,6 +3,7 @@ import { classifyRole, stateFrom } from '../adapters/email-formats';
 import { parseDates } from './dates';
 import type { EmailKind, EmailVacancy, InboxEmail } from '@/domain/inbox';
 import { INBOX_PARSER_VERSION } from '@/domain/inbox';
+import { agencyFor } from '@/domain/agencies';
 
 /*
  * Reads one recruiter email into vacancies, using the layouts Medrecruit and
@@ -26,7 +27,7 @@ export interface RawEmail {
   text: string;
   html: string;
 }
-type Draft = Omit<EmailVacancy, 'id' | 'missing' | 'opportunityId' | 'ended'>;
+export type Draft = Omit<EmailVacancy, 'id' | 'missing' | 'opportunityId' | 'ended'>;
 type State = NonNullable<ReturnType<typeof stateFrom>>;
 
 const STATE_WORD =
@@ -181,7 +182,7 @@ function rateForGrade(rateLine: string, role: string) {
 
 /* ------------------------------------------------------------- vacancies */
 
-interface Context {
+export interface Context {
   anchor: Date;
   subject: string;
   superRule: (state: string | null) => 'included' | 'additional' | 'unknown';
@@ -654,15 +655,26 @@ export function contextLines(lines: string[], ctx: Context): Draft[] {
 
 /* ------------------------------------------------------------------ email */
 
-const AGENCIES: [RegExp, string][] = [
-  [/medrecruit/i, 'Medrecruit'],
-  [/1medical/i, '1Medical'],
-];
-export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString().slice(0, 10)) {
+/** Everything both readers (built-in rules and Claude) need from one email. */
+export interface EmailParts {
+  raw: RawEmail;
+  address: string;
+  display: string;
+  agency: string;
+  /** True when built-in readers exist for this agency's layouts. */
+  rules: boolean;
+  /** True when the sender is a listed agency. */
+  listed: boolean;
+  html: string;
+  lines: string[];
+  whole: string;
+  ctx: Context;
+}
+export function emailParts(raw: RawEmail): EmailParts {
   const address = (raw.from.match(/<([^<>]+)>/)?.[1] || raw.from).trim().toLowerCase();
   const display = clean(raw.from.replace(/<[^<>]*>/, '').replace(/"/g, ''));
-  const agency =
-    AGENCIES.find(([re]) => re.test(address))?.[1] ?? address.split('@')[1] ?? 'Recruiter';
+  const known = agencyFor(address);
+  const agency = known?.name ?? (address.split('@')[1] || 'Recruiter');
   const html = raw.html && looksHtml(raw.html) ? raw.html : looksHtml(raw.text) ? raw.text : '';
   const lines = bodyLines(raw);
   const whole = lines.join('\n');
@@ -675,7 +687,9 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     allPlus = /\brates?\b[^.\n]{0,40}\b(?:are\s+)?(?:plus|\+)\s*super/i.test(whole);
   const ctx: Context = {
     anchor: raw.sentAt,
-    subject: raw.subject.replace(/^(1Medical|Medrecruit)\s*[-–:]\s*/i, ''),
+    subject: raw.subject.replace(/^[\w ]{2,30}?\s+[-–:]\s+/, (m) =>
+      agencyFor(address) && m.toLowerCase().includes(agency.toLowerCase().slice(0, 4)) ? '' : m,
+    ),
     superRule: (s) =>
       nswPlus && s === 'NSW'
         ? 'additional'
@@ -689,6 +703,23 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     travel: provided(/\b(travel|flights?|airfares?)\b/, whole),
     stay: provided(/\baccom(?:modation)?\b/, whole),
   };
+  return {
+    raw,
+    address,
+    display,
+    agency,
+    rules: !!known?.rules,
+    listed: !!known,
+    html,
+    lines,
+    whole,
+    ctx,
+  };
+}
+
+/** The built-in layout readers, tried in order; the first that yields vacancies wins. */
+export function ruleDrafts(parts: EmailParts) {
+  const { raw, html, lines, ctx } = parts;
   const parsers: [string, () => Draft[]][] = [
     ['medrecruit-digest', () => medrecruitDigest(html, ctx)],
     ['1medical-table', () => oneMedicalTable(lines, ctx)],
@@ -700,7 +731,7 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     format = '';
   const attempt = (list: [string, () => Draft[]][]) => {
     for (const [name, run] of list) {
-      drafts = run().filter((d) => d.grade || (d.start && d.hospital));
+      drafts = run().filter(usable);
       if (drafts.length) {
         format = name;
         return;
@@ -721,6 +752,67 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
   }
   // A context-only read with no dates at all is not a vacancy list.
   if (format === 'context-lines' && !drafts.some((d) => d.start)) drafts = [];
+  return { drafts, format };
+}
+/** A row is a vacancy when it names a grade, or a dated job at a named place. */
+export const usable = (d: Draft) => !!(d.grade || (d.start && d.hospital));
+
+/** One vacancy from fields copied as written (used by the Claude reader). */
+export function draftFromFields(
+  parts: EmailParts,
+  f: {
+    hospital: string;
+    town: string;
+    state: string | null;
+    role: string;
+    dates: string;
+    rate: string;
+    roster: string;
+    positions: number | null;
+    travel: boolean | null;
+    accommodation: boolean | null;
+    notes: string[];
+    excerpt: string;
+  },
+): Draft {
+  const ctx = {
+    ...parts.ctx,
+    travel: f.travel ?? parts.ctx.travel,
+    stay: f.accommodation ?? parts.ctx.stay,
+  };
+  const state = stateFrom(f.state ?? '') ?? null;
+  return vacancy(ctx, {
+    hospital: f.hospital,
+    town: f.town || undefined,
+    state,
+    role: f.role,
+    dateText: f.dates,
+    rateText: f.rate,
+    roster: f.roster,
+    excerpt: f.excerpt,
+    positions: f.positions,
+    notes: f.notes,
+  });
+}
+
+export interface ReadOverride {
+  kind?: EmailKind;
+  summary?: string;
+  agency?: string;
+  permanent?: boolean;
+  body?: string;
+  reader?: 'rules' | 'claude';
+}
+/** Builds the stored email record from drafted vacancies. */
+export function assembleEmail(
+  parts: EmailParts,
+  drafts: Draft[],
+  format: string,
+  today = new Date().toISOString().slice(0, 10),
+  override: ReadOverride = {},
+) {
+  const { raw, whole, lines, display, address } = parts;
+  const agency = override.agency || parts.agency;
   const vacancies: EmailVacancy[] = drafts.map((d, i) => {
     const missing = [
       !d.hospital || /on enquiry/i.test(d.hospital) ? 'hospital' : '',
@@ -750,6 +842,9 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     kind = 'offers';
     const live = vacancies.filter((v) => !v.ended).length;
     summary = `${vacancies.length} vacanc${vacancies.length === 1 ? 'y' : 'ies'} read${live < vacancies.length ? ` (${vacancies.length - live} already ended)` : ''}.`;
+  } else if (override.kind && override.kind !== 'offers') {
+    kind = override.kind;
+    summary = override.summary || '';
   } else if (
     links.some((l) => /hot ?jobs|netlify/i.test(l.url + l.label)) ||
     /hot jobs/i.test(whole)
@@ -763,10 +858,11 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     kind = 'other';
     summary = 'No vacancy details: a newsletter, reminder or admin email.';
   }
-  const body = lines
-    .filter((l, i) => !(i === 0 && /^Hi\b/i.test(l) && l.length < 30))
-    .join('\n')
-    .slice(0, 8000);
+  if (override.summary && kind !== 'offers') summary = override.summary;
+  const body = (
+    override.body ??
+    lines.filter((l, i) => !(i === 0 && /^Hi\b/i.test(l) && l.length < 30)).join('\n')
+  ).slice(0, 8000);
   return {
     id: raw.id,
     threadId: raw.threadId,
@@ -777,12 +873,20 @@ export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString
     receivedAt: raw.sentAt.toISOString(),
     kind,
     summary,
-    permanent: /\bpermanent\b/i.test(raw.subject + ' ' + whole.slice(0, 600)),
+    permanent: override.permanent ?? /\bpermanent\b/i.test(raw.subject + ' ' + whole.slice(0, 600)),
     vacancies,
     body,
     links,
     gmailUrl: `https://mail.google.com/mail/u/0/#all/${raw.id}`,
+    reader: override.reader ?? 'rules',
     parser: INBOX_PARSER_VERSION,
     format,
   } satisfies Omit<InboxEmail, 'importedAt' | 'status'> & { format: string };
+}
+export type ReadEmail = ReturnType<typeof assembleEmail>;
+
+export function readRecruiterEmail(raw: RawEmail, today = new Date().toISOString().slice(0, 10)) {
+  const parts = emailParts(raw);
+  const { drafts, format } = ruleDrafts(parts);
+  return assembleEmail(parts, drafts, format, today);
 }

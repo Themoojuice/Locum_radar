@@ -7,10 +7,19 @@ import {
   inboxQuery,
   type EmailVacancy,
   type InboxEmail,
+  type InboxSettings,
 } from '@/domain/inbox';
+import { agencyFor, searchDomains } from '@/domain/agencies';
 import { gmailRequest, type GmailPart } from '../acquisition/gmail';
 import { resolveFacility } from '../adapters/myhospitals';
-import { readRecruiterEmail, type RawEmail } from './recruiter-email';
+import { readRecruiterEmail, type RawEmail, type ReadEmail } from './recruiter-email';
+import {
+  askClaude,
+  claudeConfigured,
+  emailFromAnswer,
+  emailPrompt,
+  type ClaudeImage,
+} from './claude-reader';
 
 /*
  * Gmail → Inbox: list recruiter emails, read each one, keep a record per
@@ -29,10 +38,10 @@ interface GmailMessage {
 }
 
 /** Message ids matching the recruiter search, newest first. */
-export async function listInboxIds(days: number) {
+export async function listInboxIds(days: number, settings: InboxSettings) {
   const ids: string[] = [];
   let page: string | undefined;
-  const q = encodeURIComponent(inboxQuery(days));
+  const q = encodeURIComponent(inboxQuery(days, searchDomains(settings), settings.label));
   do {
     const data = await gmailRequest<{ messages?: { id: string }[]; nextPageToken?: string }>(
       `/gmail/v1/users/me/messages?q=${q}&maxResults=100${page ? `&pageToken=${page}` : ''}`,
@@ -84,11 +93,93 @@ export async function fetchEmails(ids: string[]) {
   return out;
 }
 
-/** Ids not yet read by the current parser (or every id when re-reading). */
-export function unreadIds(store: Store, ids: string[], reread = false) {
+/**
+ * Ids not yet read by the current parser, plus emails left for Claude once a
+ * key is available (or every id when re-reading).
+ */
+export function unreadIds(store: Store, ids: string[], reread = false, claude = false) {
   if (reread) return ids;
-  const known = new Map(store.inbox.map((e) => [e.id, e.parser]));
-  return ids.filter((id) => known.get(id) !== INBOX_PARSER_VERSION);
+  const known = new Map(store.inbox.map((e) => [e.id, e]));
+  return ids.filter((id) => {
+    const e = known.get(id);
+    return !e || e.parser !== INBOX_PARSER_VERSION || (claude && !!e.claudePending);
+  });
+}
+
+/* ------------------------------------------------------------- reading */
+
+export type Reading = ReadEmail & { claudePending?: boolean; cost?: number; notice?: string };
+/**
+ * Built-in readers first. Claude reads emails from agencies without a built-in
+ * reader, and offer-like emails the rules could not read. Network work happens
+ * here, outside any database transaction.
+ */
+export async function readEmail(
+  raw: RawEmail,
+  options: { claude: boolean; today?: string; ask?: typeof askClaude },
+): Promise<Reading> {
+  const today = options.today ?? new Date().toISOString().slice(0, 10);
+  const rules = readRecruiterEmail(raw, today);
+  const known = !!agencyFor(rules.fromAddress)?.rules;
+  const wanted = !known || rules.kind === 'unparsed';
+  if (!wanted || !options.claude) return rules;
+  if (!options.ask && !claudeConfigured())
+    return {
+      ...rules,
+      claudePending: true,
+      summary: `${rules.summary} Add an Anthropic key in Settings and Claude will read it.`,
+    };
+  try {
+    const { answer, cost } = await (options.ask ?? askClaude)(emailPrompt(raw));
+    const read = emailFromAnswer(raw, answer, today);
+    // Keep the built-in reading when Claude finds nothing more.
+    if (!read.vacancies.length && rules.vacancies.length) return { ...rules, cost };
+    return { ...read, cost };
+  } catch (error) {
+    return {
+      ...rules,
+      claudePending: true,
+      notice: (error as Error).message,
+      summary: `${rules.summary} Claude could not read it: ${(error as Error).message}`,
+    };
+  }
+}
+
+/** A pasted advert (text and/or screenshots), read by Claude. */
+export async function readPasted(
+  input: { text: string; images: ClaudeImage[] },
+  now = new Date(),
+  ask: typeof askClaude = askClaude,
+): Promise<{ raw: RawEmail; read: Reading }> {
+  const { answer, cost } = await ask(input.text, input.images);
+  const text = [input.text.trim(), answer.transcript.trim()].filter(Boolean).join('\n\n');
+  const raw: RawEmail = {
+    id: `paste-${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    threadId: '',
+    from: answer.agency || 'Pasted advert',
+    subject:
+      answer.summary ||
+      text
+        .split('\n')
+        .find((l) => l.trim())
+        ?.slice(0, 120) ||
+      (input.images.length ? 'Screenshot' : 'Pasted advert'),
+    sentAt: now,
+    text,
+    html: '',
+  };
+  const read = emailFromAnswer(raw, answer, now.toISOString().slice(0, 10), text);
+  return {
+    raw,
+    read: {
+      ...read,
+      agency: answer.agency || 'Pasted',
+      recruiter: answer.agency || 'Pasted advert',
+      fromAddress: '',
+      gmailUrl: '',
+      cost,
+    },
+  };
 }
 
 /* ---------------------------------------------------------------- feed */
@@ -171,7 +262,7 @@ export function listingFor(
   const listing: ListingInput = {
     sourceId: 'email',
     externalId: key,
-    url: email.gmailUrl,
+    url: email.gmailUrl || null,
     rawText: cap(
       `From: ${email.recruiter} (${email.agency})\nSubject: ${email.subject}\n${v.excerpt}`,
       100000,
@@ -222,13 +313,21 @@ export function listingFor(
 }
 
 /** Stores the email (keeping its review status) and adds its vacancies to the feed. */
-export function saveEmail(store: Store, raw: RawEmail, now = new Date()) {
-  const read = readRecruiterEmail(raw, now.toISOString().slice(0, 10));
-  const { format: _format, ...fields } = read;
+export function saveEmail(
+  store: Store,
+  raw: RawEmail,
+  now = new Date(),
+  reading?: Reading,
+  origin: InboxEmail['origin'] = 'gmail',
+) {
+  const read = reading ?? readRecruiterEmail(raw, now.toISOString().slice(0, 10));
+  const { format: _format, notice: _notice, ...fields } = read as Reading;
   void _format;
+  void _notice;
   const previous = store.inbox.find((e) => e.id === raw.id);
   const email: InboxEmail = {
     ...fields,
+    origin,
     importedAt: previous?.importedAt ?? now.toISOString(),
     status: previous?.status ?? 'new',
   };

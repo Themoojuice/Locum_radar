@@ -16,7 +16,8 @@ export function collectionPlan(
       );
   }
   const sources = store.sources
-    .filter((s) => s.type !== 'manual' && (s.type !== 'email' || s.method === 'collector'))
+    // Only structured agency feeds run in the app; email arrives through the recruiter inbox.
+    .filter((s) => s.method === 'json-api')
     .map((source) => {
       const nextAttempt = source.lastAttempt
         ? new Date(Date.parse(source.lastAttempt) + source.intervalHours * 3600000).toISOString()

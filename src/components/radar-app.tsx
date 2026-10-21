@@ -46,9 +46,11 @@ import { ProfileForm } from './profile-form';
 import { ImportDialog } from './import-dialog';
 import { OpportunityDetail } from './opportunity-detail';
 import { CalendarView, ComparisonView, GeographicExplorer } from './explorer';
-import { GmailConnection } from './acquisition-settings';
 import { SourcesView } from './sources-view';
 import { RecruiterInbox } from './recruiter-inbox';
+import { InboxCard } from './inbox-card';
+import { hoursSinceImport, runInboxImport, type ImportProgress } from './inbox-import';
+import { inboxSettings } from '@/domain/agencies';
 import { CollectionProgress } from './collection-progress';
 import { PendingJobCard } from './collected-adverts';
 import { jobPool, matchesPool, poolRate, olderEmail } from '@/domain/job-pool';
@@ -212,7 +214,9 @@ export function RadarApp() {
     [loginRequired, setLoginRequired] = useState(false),
     [hasPassword, setHasPassword] = useState(false);
   const [sourceSettingsOpen, setSourceSettingsOpen] = useState(false);
-  const [inboxAuto, setInboxAuto] = useState(false);
+  const [inboxAuto, setInboxAuto] = useState(false),
+    [inboxPanel, setInboxPanel] = useState<'paste' | 'settings' | null>(null),
+    [backgroundImport, setBackgroundImport] = useState<ImportProgress | null>(null);
   const [view, setView] = useState<View>('Discover'),
     [search, setSearch] = useState(''),
     [specialty, setSpecialty] = useState(''),
@@ -240,6 +244,32 @@ export function RadarApp() {
     [loginError, setLoginError] = useState('');
   const [extraFilters, setExtraFilters] = useState(false),
     [savingWeights, setSavingWeights] = useState(false);
+  /** Imports new recruiter emails in the background when the last import is stale. */
+  async function autoImport(value: Store) {
+    const settings = inboxSettings(value);
+    if (!settings.autoImport || hoursSinceImport(value.inbox ?? []) < 6) return;
+    try {
+      const gmail = await (await fetch('/api/gmail', { cache: 'no-store' })).json();
+      if (!gmail.connected) return;
+      const p = await runInboxImport({ onProgress: setBackgroundImport, onBatch: reload });
+      // A first import into an empty workspace replaces the example data.
+      if (p.vacancies) setDemo(false);
+      if (p.added)
+        setToast(
+          `Recruiter inbox: ${p.added} new vacanc${p.added === 1 ? 'y' : 'ies'} added to your feed.`,
+        );
+    } catch {
+      // Background import is best-effort; the inbox page shows errors when run by hand.
+    } finally {
+      setBackgroundImport(null);
+    }
+  }
+  function openInbox(panel: 'paste' | 'settings' | null = null, start = false) {
+    if (demo) changeMode(false);
+    setInboxPanel(panel);
+    setInboxAuto(start);
+    navigate('Inbox');
+  }
   async function reload() {
     const r = await fetch('/api/radar', { cache: 'no-store' });
     if (r.status === 401) {
@@ -269,18 +299,26 @@ export function RadarApp() {
         if (!response.ok) throw new Error(value.error);
         if (active) {
           setLive(value);
+          const connected =
+            new URLSearchParams(window.location.search).get('gmail') === 'connected';
           if (new URLSearchParams(window.location.search).has('gmail')) {
-            setView('Discover');
+            setView(connected ? 'Inbox' : 'Discover');
+            setInboxAuto(connected);
             setToast(
-              new URLSearchParams(window.location.search).get('gmail') === 'connected'
-                ? 'Gmail connected. Search the last 30 days from Discover.'
+              connected
+                ? 'Gmail connected. Importing your recruiter emails…'
                 : 'Google connection was not completed. Check the setup details and try again.',
             );
           }
           setDemo(
-            !value.starterAvailable && value.opportunities.length === 0 && !value.reviews.length,
+            !value.starterAvailable &&
+              value.opportunities.length === 0 &&
+              !value.reviews.length &&
+              !value.inbox?.length &&
+              !connected,
           );
           setLoaded(true);
+          if (!connected) void autoImport(value);
         }
       } catch (e) {
         if (active) {
@@ -292,6 +330,8 @@ export function RadarApp() {
     return () => {
       active = false;
     };
+    // Runs once on opening the workspace; autoImport only reads stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!toast) return;
@@ -676,19 +716,7 @@ export function RadarApp() {
                         Export
                       </button>
                       {!demo && (
-                        <button
-                          className="button secondary"
-                          onClick={() => {
-                            setView('Discover');
-                            setTimeout(
-                              () =>
-                                document
-                                  .getElementById('gmail-import')
-                                  ?.scrollIntoView({ behavior: 'smooth' }),
-                              0,
-                            );
-                          }}
-                        >
+                        <button className="button secondary" onClick={() => openInbox(null, true)}>
                           Import from Gmail
                         </button>
                       )}
@@ -770,13 +798,12 @@ export function RadarApp() {
                       />
                     )}
                     {view === 'Discover' && !demo && (
-                      <GmailConnection
+                      <InboxCard
                         store={store}
-                        reload={reload}
-                        onOpenInbox={() => {
-                          setInboxAuto(true);
-                          navigate('Inbox');
-                        }}
+                        background={backgroundImport}
+                        onImport={() => openInbox(null, true)}
+                        onPaste={() => openInbox('paste')}
+                        onOpen={() => openInbox()}
                       />
                     )}
                   </div>
@@ -787,7 +814,7 @@ export function RadarApp() {
                       open={sourceSettingsOpen}
                       onToggle={(e) => setSourceSettingsOpen(e.currentTarget.open)}
                     >
-                      <summary>Source settings: connect or fix a source</summary>
+                      <summary>Agency job boards</summary>
                       <SourcesView store={store} demo={demo} reload={reload} notify={setToast} />
                     </details>
                   )}
@@ -1222,6 +1249,7 @@ export function RadarApp() {
               )}
               {view === 'Inbox' && (
                 <RecruiterInbox
+                  key={`inbox-${inboxPanel ?? 'list'}`}
                   store={store}
                   demo={demo}
                   reload={reload}
@@ -1232,8 +1260,9 @@ export function RadarApp() {
                     changeMode(false);
                     setView('Inbox');
                   }}
-                  autoStart={inboxAuto}
+                  autoStart={inboxAuto && !backgroundImport}
                   onAutoStarted={() => setInboxAuto(false)}
+                  initialPanel={inboxPanel}
                 />
               )}
               {view === 'Compare' && (

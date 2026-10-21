@@ -7,7 +7,7 @@ import { ingest, mergeOpportunities, splitListing } from '@/domain/ingestion';
 import { previewImport } from '@/server/extraction';
 import { collectSource, configIdentity } from '@/server/collectors';
 import { collectorConfigSchema } from '@/domain/acquisition';
-import { configForSource, sourceRecipes, sourceFromRecipe } from '@/domain/source-catalog';
+import { configForSource } from '@/domain/source-catalog';
 import { prepareCollection } from '@/server/maintenance';
 import { requestStop } from '@/server/progress';
 import { sourceAdapters } from '@/server/adapters/registry';
@@ -17,9 +17,14 @@ import {
   clearLegacyGmailReviews,
   fetchEmails,
   listInboxIds,
+  readEmail,
+  readPasted,
   saveEmail,
   unreadIds,
 } from '@/server/email/inbox';
+import { claudeConfigured } from '@/server/email/claude-reader';
+import { checkCandidates, checkClaude } from '@/server/email/claude-check';
+import { agencyIds, inboxSettings } from '@/domain/agencies';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const commandSchema = z.discriminatedUnion('command', [
@@ -50,12 +55,6 @@ const commandSchema = z.discriminatedUnion('command', [
     collector: collectorConfigSchema.optional(),
     refreshGmail: z.boolean().optional(),
   }),
-  z.object({ command: z.literal('catalog') }),
-  z.object({
-    command: z.literal('add-source'),
-    name: z.string().min(1).max(150),
-    collector: collectorConfigSchema,
-  }),
   z.object({ command: z.literal('clear-evidence'), sourceId: z.string() }),
   z.object({ command: z.literal('collect'), sourceId: z.string() }),
   z.object({ command: z.literal('prepare') }),
@@ -66,8 +65,42 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('delete'), opportunityId: z.string() }),
   z.object({
     command: z.literal('inbox-list'),
-    days: z.number().int().min(1).max(365),
+    days: z.number().int().min(1).max(365).optional(),
     reread: z.boolean().optional(),
+  }),
+  z.object({
+    command: z.literal('inbox-paste'),
+    text: z.string().max(60000),
+    images: z
+      .array(
+        z.object({
+          mediaType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+          data: z
+            .string()
+            .regex(/^[A-Za-z0-9+/=]+$/)
+            .max(1400000),
+        }),
+      )
+      .max(4),
+  }),
+  z.object({
+    command: z.literal('inbox-settings'),
+    settings: z.object({
+      agencies: z.array(z.string().max(60)).max(60),
+      signedUp: z.array(z.string().max(60)).max(60),
+      extraDomains: z
+        .array(
+          z
+            .string()
+            .regex(/^@?[a-z0-9.-]+\.[a-z]{2,}$/i)
+            .max(120),
+        )
+        .max(30),
+      label: z.string().max(100),
+      days: z.number().int().min(1).max(365),
+      autoImport: z.boolean(),
+      claude: z.boolean(),
+    }),
   }),
   z.object({
     command: z.literal('inbox-read'),
@@ -82,6 +115,7 @@ const commandSchema = z.discriminatedUnion('command', [
     status: z.enum(['new', 'seen', 'dismissed']),
   }),
   z.object({ command: z.literal('inbox-clear-legacy') }),
+  z.object({ command: z.literal('inbox-claude-check') }),
 ]);
 import { screenStoredEmail } from '@/domain/email-screening';
 import { linkInboxImports } from '@/domain/inbox';
@@ -145,25 +179,74 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
     if (body.command === 'inbox-list') {
-      const ids = await listInboxIds(body.days);
-      const todo = unreadIds(await readStore(), ids, body.reread);
-      return NextResponse.json({ total: ids.length, ids: todo });
+      const store = await readStore();
+      const settings = inboxSettings(store);
+      const ids = await listInboxIds(body.days ?? settings.days, settings);
+      const claude = settings.claude && claudeConfigured();
+      const todo = unreadIds(store, ids, body.reread, claude);
+      return NextResponse.json({ total: ids.length, ids: todo, claude });
     }
     if (body.command === 'inbox-read') {
-      // Gmail is read before the database transaction so the store is never locked on the network.
+      // Gmail and Claude are read before the database transaction, so the store is
+      // never locked on the network.
+      const settings = inboxSettings(await readStore());
       const raws = await fetchEmails(body.ids);
+      const readings = await Promise.all(
+        raws.map((raw) => readEmail(raw, { claude: settings.claude })),
+      );
       return NextResponse.json(
         await transaction((s) => {
           let added = 0,
             vacancies = 0,
-            offers = 0;
-          for (const raw of raws) {
-            const saved = saveEmail(s, raw);
+            offers = 0,
+            cost = 0,
+            claude = 0;
+          const notices = new Set<string>();
+          raws.forEach((raw, i) => {
+            const saved = saveEmail(s, raw, new Date(), readings[i]);
             added += saved.added;
             vacancies += saved.email.vacancies.length;
             if (saved.email.kind === 'offers') offers++;
-          }
-          return { read: raws.length, offers, vacancies, added };
+            if (readings[i].reader === 'claude') claude++;
+            cost += readings[i].cost ?? 0;
+            if (readings[i].notice) notices.add(readings[i].notice!);
+          });
+          return {
+            read: raws.length,
+            offers,
+            vacancies,
+            added,
+            claude,
+            cost,
+            notices: [...notices],
+          };
+        }),
+      );
+    }
+    if (body.command === 'inbox-claude-check') {
+      if (!claudeConfigured()) throw new Error('Save your Anthropic API key first.');
+      const ids = checkCandidates(await readStore());
+      if (!ids.length)
+        throw new Error(
+          'Import some Medrecruit or 1Medical offers first; they are the answer key.',
+        );
+      return NextResponse.json(await checkClaude(await fetchEmails(ids)));
+    }
+    if (body.command === 'inbox-paste') {
+      if (!claudeConfigured())
+        throw new Error('Reading pasted adverts needs your Anthropic API key (Settings).');
+      const { raw, read } = await readPasted({ text: body.text, images: body.images });
+      return NextResponse.json(
+        await transaction((s) => {
+          const saved = saveEmail(s, raw, new Date(), read, 'paste');
+          return {
+            id: saved.email.id,
+            kind: saved.email.kind,
+            vacancies: saved.email.vacancies.length,
+            added: saved.added,
+            summary: saved.email.summary,
+            cost: read.cost ?? 0,
+          };
         }),
       );
     }
@@ -173,44 +256,18 @@ export async function POST(request: Request) {
           for (const e of s.inbox) if (body.ids.includes(e.id)) e.status = body.status;
           return { ok: true };
         }
+        case 'inbox-settings': {
+          const value = {
+            id: 'inbox' as const,
+            ...body.settings,
+            extraDomains: body.settings.extraDomains.map((d) => d.replace(/^@/, '').toLowerCase()),
+            knownAgencies: agencyIds(),
+          };
+          s.settings = [...(s.settings ?? []).filter((v) => v.id !== 'inbox'), value];
+          return value;
+        }
         case 'inbox-clear-legacy':
           return { cleared: clearLegacyGmailReviews(s) };
-        case 'catalog': {
-          for (const recipe of sourceRecipes) {
-            const existing = s.sources.find((v) => v.id === recipe.id);
-            if (!existing) s.sources.push(sourceFromRecipe(recipe));
-            else {
-              existing.collector ??= structuredClone(recipe.config);
-              existing.qualification = recipe.qualification;
-              if (recipe.accessRestriction && existing.permission === 'unreviewed') {
-                existing.permission = 'denied';
-                existing.permissionEvidence = recipe.accessRestriction;
-                existing.enabled = false;
-              }
-              existing.method = sourceAdapters[existing.id] ? 'json-api' : 'collector';
-            }
-          }
-          return { ok: true };
-        }
-        case 'add-source': {
-          const id = 'custom-' + crypto.randomUUID();
-          s.sources.push({
-            id,
-            name: body.name,
-            url: body.collector.startUrls[0] || 'https://search.brave.com/',
-            type: 'discovery',
-            method: 'collector',
-            collector: body.collector,
-            permission: 'unreviewed',
-            permissionEvidence: '',
-            enabled: false,
-            intervalHours: 24,
-            lastSuccess: null,
-            lastAttempt: null,
-            error: null,
-          });
-          return { id };
-        }
         case 'clear-evidence': {
           const source = s.sources.find((v) => v.id === body.sourceId);
           if (

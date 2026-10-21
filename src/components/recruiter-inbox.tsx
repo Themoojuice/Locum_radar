@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   CircleAlert,
   CircleCheck,
+  ClipboardPaste,
   ExternalLink,
   EyeOff,
   House,
@@ -11,16 +12,17 @@ import {
   Plane,
   RefreshCw,
   Search,
+  Settings2,
+  Sparkles,
 } from 'lucide-react';
 import type { ListingInput, Store } from '@/domain/model';
-import {
-  draftFromVacancy,
-  RECRUITER_DOMAINS,
-  type EmailVacancy,
-  type InboxEmail,
-} from '@/domain/inbox';
+import { draftFromVacancy, type EmailVacancy, type InboxEmail } from '@/domain/inbox';
+import { agencies as agencyList, inboxSettings, searchDomains } from '@/domain/agencies';
 import { api, Badge } from './shared';
 import { ProviderSetup } from './provider-setup';
+import { dollars, runInboxImport, type ImportProgress } from './inbox-import';
+import { InboxSettingsPanel } from './inbox-settings';
+import { PastePanel } from './inbox-paste';
 
 /*
  * Recruiter inbox: one button reads Medrecruit and 1Medical emails from Gmail;
@@ -31,15 +33,6 @@ interface GmailStatus {
   configured: boolean;
   connected: boolean;
   error?: string;
-}
-interface Progress {
-  phase: 'listing' | 'reading' | 'done' | 'stopped';
-  total: number;
-  todo: number;
-  done: number;
-  offers: number;
-  vacancies: number;
-  added: number;
 }
 interface Row {
   v: EmailVacancy;
@@ -120,6 +113,7 @@ export function RecruiterInbox({
   onLeaveDemo,
   autoStart,
   onAutoStarted,
+  initialPanel = null,
 }: {
   store: Store;
   demo: boolean;
@@ -130,13 +124,17 @@ export function RecruiterInbox({
   onLeaveDemo: () => void;
   autoStart: boolean;
   onAutoStarted: () => void;
+  initialPanel?: 'paste' | 'settings' | null;
 }) {
   const inbox = useMemo(() => store.inbox ?? [], [store.inbox]);
+  const settings = inboxSettings(store);
   const [gmail, setGmail] = useState<GmailStatus | null>(null),
-    [days, setDays] = useState(30),
-    [progress, setProgress] = useState<Progress | null>(null),
+    [claudeKey, setClaudeKey] = useState<boolean | null>(null),
+    [days, setDays] = useState(settings.days),
+    [progress, setProgress] = useState<ImportProgress | null>(null),
     [error, setError] = useState(''),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [panel, setPanel] = useState<'paste' | 'settings' | null>(initialPanel);
   const [mode, setMode] = useState<'vacancies' | 'emails'>('vacancies'),
     [agency, setAgency] = useState(''),
     [stateFilter, setStateFilter] = useState(''),
@@ -163,51 +161,35 @@ export function RecruiterInbox({
         setError(e.message);
         return null;
       });
+  const checkClaude = () =>
+    fetch('/api/setup', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((v) => setClaudeKey(!!v.configured?.ANTHROPIC_API_KEY))
+      .catch(() => setClaudeKey(false));
   async function runImport(reread = false) {
     setBusy(true);
     setError('');
     stop.current = false;
-    const p: Progress = {
-      phase: 'listing',
-      total: 0,
-      todo: 0,
-      done: 0,
-      offers: 0,
-      vacancies: 0,
-      added: 0,
-    };
-    setProgress({ ...p });
     try {
-      const list: { total: number; ids: string[] } = await api({
-        command: 'inbox-list',
+      const p = await runInboxImport({
         days,
         reread,
+        onProgress: setProgress,
+        onBatch: reload,
+        stopped: () => stop.current,
       });
-      Object.assign(p, { phase: 'reading', total: list.total, todo: list.ids.length });
-      setProgress({ ...p });
-      for (let i = 0; i < list.ids.length && !stop.current; i += 8) {
-        const r = await api({ command: 'inbox-read', ids: list.ids.slice(i, i + 8) });
-        p.done += r.read;
-        p.offers += r.offers;
-        p.vacancies += r.vacancies;
-        p.added += r.added;
-        setProgress({ ...p });
-        await reload();
-      }
-      p.phase = stop.current ? 'stopped' : 'done';
-      setProgress({ ...p });
       if (p.added)
         notify(`${p.added} new vacanc${p.added === 1 ? 'y' : 'ies'} added to your feed.`);
     } catch (e) {
       setError((e as Error).message);
-      p.phase = 'stopped';
-      setProgress({ ...p });
+      setProgress((p) => (p ? { ...p, phase: 'stopped' } : p));
     } finally {
       setBusy(false);
     }
   }
   useEffect(() => {
     if (demo) return;
+    void checkClaude();
     // Opened from "Import offers" elsewhere: start once Gmail is confirmed connected.
     void checkGmail().then((v) => {
       if (v?.connected && autoStart) {
@@ -273,6 +255,8 @@ export function RecruiterInbox({
   const needs = current.filter((v) => !v.opportunityId).length;
   const offerEmails = inbox.filter((e) => e.kind === 'offers').length;
   const newCount = inbox.filter((e) => e.status === 'new' && e.kind !== 'other').length;
+  const pending = inbox.filter((e) => e.claudePending).length;
+  const spent = inbox.reduce((n, e) => n + (e.cost ?? 0), 0);
   const legacy = store.reviews.filter(
     (r) =>
       !r.resolved &&
@@ -281,6 +265,11 @@ export function RecruiterInbox({
         store.sources.find((s) => s.id === r.sourceId)?.collector?.kind === 'gmail'),
   ).length;
   const states = [...new Set(current.map((v) => v.state).filter(Boolean))].sort() as string[];
+  const searched = agencyList.filter((a) => settings.agencies.includes(a.id)).map((a) => a.name);
+  const searchedText =
+    searched.length > 3
+      ? `${searched.slice(0, 3).join(', ')} and ${searched.length - 3 + settings.extraDomains.length} more`
+      : [...searched, ...settings.extraDomains].join(', ');
 
   const percent = progress && progress.todo ? Math.round((progress.done / progress.todo) * 100) : 0;
 
@@ -291,11 +280,57 @@ export function RecruiterInbox({
           <p className="eyebrow">RECRUITER EMAILS</p>
           <h1>Your offers, in one place.</h1>
           <p>
-            Reads emails from {RECRUITER_DOMAINS.join(' and ')} and lists every vacancy they
-            contain. Newsletters, reminders and admin emails are set aside.
+            Every vacancy from your recruiters’ emails, plus anything you paste in. Newsletters,
+            reminders and admin emails are set aside.
           </p>
         </div>
+        {!demo && (
+          <div className="button-row">
+            <button
+              className={`button ${panel === 'paste' ? 'primary' : 'secondary'}`}
+              onClick={() => setPanel(panel === 'paste' ? null : 'paste')}
+              aria-expanded={panel === 'paste'}
+            >
+              <ClipboardPaste size={15} /> Add an advert
+            </button>
+            <button
+              className={`button ${panel === 'settings' ? 'primary' : 'secondary'}`}
+              onClick={() => setPanel(panel === 'settings' ? null : 'settings')}
+              aria-expanded={panel === 'settings'}
+            >
+              <Settings2 size={15} /> Settings
+            </button>
+          </div>
+        )}
       </div>
+
+      {panel === 'paste' && !demo && (
+        <PastePanel
+          claudeKey={!!claudeKey}
+          onNeedKey={() => setPanel('settings')}
+          onDone={async (r) => {
+            await reload();
+            notify(
+              r.vacancies
+                ? `${r.vacancies} vacanc${r.vacancies === 1 ? 'y' : 'ies'} read${r.added ? `; ${r.added} added to your feed` : ''}.`
+                : r.summary || 'Saved; no dated vacancy found.',
+            );
+            setMode('vacancies');
+          }}
+        />
+      )}
+      {panel === 'settings' && !demo && (
+        <InboxSettingsPanel
+          store={store}
+          claudeKey={claudeKey}
+          onClaudeSaved={() => void checkClaude()}
+          spent={spent}
+          onSaved={async () => {
+            await reload();
+            notify('Inbox settings saved.');
+          }}
+        />
+      )}
 
       <section className="panel inbox-import" aria-labelledby="inbox-import-title">
         <div className="inbox-import-main">
@@ -313,14 +348,17 @@ export function RecruiterInbox({
                     ? 'Add your Google client details once to connect Gmail (read-only).'
                     : !gmail.connected
                       ? 'Connect Gmail (read-only) to import recruiter offers.'
-                      : inbox.length
-                        ? `Last import ${received(
-                            inbox
-                              .map((e) => e.importedAt)
-                              .sort()
-                              .at(-1)!,
-                          )} · ${inbox.length} emails kept · only new emails are read again.`
-                        : 'Connected. Import reads only Medrecruit and 1Medical emails.'}
+                      : `Searches ${searchedText || 'no agencies yet'}${settings.label ? ` and your “${settings.label}” label` : ''}.${
+                          inbox.length
+                            ? ` Last import ${received(
+                                inbox
+                                  .filter((e) => e.origin !== 'paste')
+                                  .map((e) => e.importedAt)
+                                  .sort()
+                                  .at(-1) ?? new Date().toISOString(),
+                              )}; only new emails are read.`
+                            : ''
+                        }`}
             </p>
           </div>
         </div>
@@ -373,7 +411,9 @@ export function RecruiterInbox({
               ) : (
                 <button
                   className="button primary"
-                  disabled={!gmail?.connected}
+                  disabled={
+                    !gmail?.connected || (!searchDomains(settings).length && !settings.label)
+                  }
                   onClick={() => runImport()}
                 >
                   <RefreshCw size={15} /> Import offers
@@ -399,10 +439,10 @@ export function RecruiterInbox({
               {progress.phase === 'listing'
                 ? `Searching Gmail for the last ${days} days…`
                 : progress.total === 0
-                  ? `No Medrecruit or 1Medical emails in the last ${days} days.`
+                  ? `No recruiter emails in the last ${days} days.`
                   : progress.todo === 0
                     ? `All ${progress.total} emails from the last ${days} days were already read.`
-                    : `${progress.phase === 'reading' ? 'Reading' : progress.phase === 'stopped' ? 'Stopped after' : 'Read'} ${progress.done} of ${progress.todo} new email${progress.todo === 1 ? '' : 's'} · ${progress.offers} with offers · ${progress.vacancies} vacancies · ${progress.added} new in your feed`}
+                    : `${progress.phase === 'reading' ? 'Reading' : progress.phase === 'stopped' ? 'Stopped after' : 'Read'} ${progress.done} of ${progress.todo} new email${progress.todo === 1 ? '' : 's'} · ${progress.offers} with offers · ${progress.vacancies} vacancies · ${progress.added} new in your feed${progress.claude ? ` · Claude read ${progress.claude} (${dollars(progress.cost)})` : ''}`}
               {progress.phase !== 'reading' &&
                 progress.phase !== 'listing' &&
                 progress.total > 0 && (
@@ -414,6 +454,11 @@ export function RecruiterInbox({
                   </>
                 )}
             </p>
+            {progress.notices.map((n) => (
+              <p className="error small" key={n}>
+                {n}
+              </p>
+            ))}
           </div>
         )}
         {error && (
@@ -422,6 +467,24 @@ export function RecruiterInbox({
           </p>
         )}
       </section>
+
+      {pending > 0 && !demo && (
+        <div className="inbox-legacy panel">
+          <Sparkles size={17} />
+          <p className="small">
+            <strong>{pending}</strong> email{pending === 1 ? '' : 's'} from agencies without a
+            built-in reader {pending === 1 ? 'is' : 'are'} waiting for Claude.{' '}
+            {claudeKey
+              ? 'Import again to read them.'
+              : 'Add an Anthropic API key in Settings and import again.'}
+          </p>
+          {!claudeKey && (
+            <button className="button secondary small" onClick={() => setPanel('settings')}>
+              Open settings
+            </button>
+          )}
+        </div>
+      )}
 
       {legacy > 0 && !demo && (
         <div className="inbox-legacy panel">
@@ -680,7 +743,12 @@ function VacancyRow({
           </small>
         </span>
         <span className="vacancy-source">
-          <strong>{email.agency}</strong>
+          <strong>
+            {email.agency}
+            {email.reader === 'claude' && (
+              <Sparkles size={11} className="claude-mark" aria-label="Read by Claude" />
+            )}
+          </strong>
           <small>
             {received(email.receivedAt)}
             {row.repeats.length > 0 && ` · +${row.repeats.length}`}
@@ -743,9 +811,11 @@ function VacancyDetail({ row }: { row: Row }) {
         {email.recruiter} · {email.agency} · “{email.subject}” · {received(email.receivedAt)}
         {row.repeats.length > 0 &&
           ` · also in ${row.repeats.length} other email${row.repeats.length === 1 ? '' : 's'}`}{' '}
-        <a href={email.gmailUrl} target="_blank" rel="noreferrer" className="text-button">
-          Open in Gmail <ExternalLink size={12} />
-        </a>
+        {email.gmailUrl && (
+          <a href={email.gmailUrl} target="_blank" rel="noreferrer" className="text-button">
+            Open in Gmail <ExternalLink size={12} />
+          </a>
+        )}
       </p>
     </div>
   );
@@ -853,11 +923,22 @@ function EmailCard({
             {email.status === 'new' && email.kind !== 'other' && (
               <span className="unread-dot" aria-label="New" />
             )}
-            <strong>{email.recruiter}</strong> · {email.agency} · {received(email.receivedAt)}
+            <strong>{email.recruiter}</strong>
+            {email.recruiter !== email.agency && ` · ${email.agency}`} ·{' '}
+            {email.origin === 'paste' ? 'pasted ' : ''}
+            {received(email.receivedAt)}
           </p>
           <h3>{email.subject}</h3>
           <p className="small muted">
-            <Badge tone={tone}>{label}</Badge> {email.summary}
+            <Badge tone={tone}>{label}</Badge>{' '}
+            {email.reader === 'claude' && (
+              <>
+                <Badge tone="lavender">
+                  <Sparkles size={10} /> Read by Claude
+                </Badge>{' '}
+              </>
+            )}
+            {email.summary}
             {email.permanent && (
               <>
                 {' '}
@@ -867,16 +948,18 @@ function EmailCard({
           </p>
         </div>
         <div className="email-actions">
-          <a
-            className="icon-button"
-            href={email.gmailUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Open in Gmail"
-            title="Open in Gmail"
-          >
-            <ArrowUpRight size={16} />
-          </a>
+          {email.gmailUrl && (
+            <a
+              className="icon-button"
+              href={email.gmailUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open in Gmail"
+              title="Open in Gmail"
+            >
+              <ArrowUpRight size={16} />
+            </a>
+          )}
           <button
             className="icon-button"
             aria-label={email.status === 'dismissed' ? 'Show again' : 'Hide this email'}
@@ -939,7 +1022,7 @@ function EmailCard({
         </div>
       )}
       <details className="email-body">
-        <summary>Show email text</summary>
+        <summary>{email.origin === 'paste' ? 'Show pasted text' : 'Show email text'}</summary>
         <pre>{email.body}</pre>
       </details>
     </article>

@@ -15,11 +15,13 @@ function readyStore() {
   return store;
 }
 describe('source collection planning', () => {
-  it('counts registered web sources, excluding manual and email channels', () => {
+  it('plans only the structured agency feeds; email and generic pages are not scheduled', () => {
     const plan = collectionPlan(emptyStore(), false, now);
-    expect(plan.sources).toHaveLength(14);
+    expect(plan.sources.map((s) => s.id).sort()).toEqual(
+      ['1medical', 'adzuna', 'medrecruit', 'wavelength'].sort(),
+    );
     expect(plan.checked).toBe(0);
-    expect(plan.neverChecked).toBe(14);
+    expect(plan.neverChecked).toBe(4);
     expect(plan.ready).toBe(0);
   });
   it('only queues supported, approved, enabled and due sources', () => {
@@ -48,7 +50,7 @@ describe('source collection planning', () => {
     source.lastAttempt = '2026-10-11T02:00:00Z';
     source.error = 'HTTP 503';
     const plan = collectionPlan(store, true, now);
-    expect(plan.neverChecked).toBe(14);
+    expect(plan.neverChecked).toBe(4);
     expect(plan.ready).toBe(1);
   });
 });

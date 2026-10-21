@@ -57,7 +57,16 @@ export interface InboxEmail {
   body: string;
   /** Useful links in the email (for example Medrecruit's hot-jobs page). */
   links: { label: string; url: string }[];
+  /** Empty for pasted adverts. */
   gmailUrl: string;
+  /** Where it came from: a Gmail message, or text/screenshots pasted by hand. */
+  origin?: 'gmail' | 'paste';
+  /** Which reader produced the vacancies. */
+  reader?: 'rules' | 'claude';
+  /** Claude would read this email once a key is saved. */
+  claudePending?: boolean;
+  /** Claude cost for this email, in US dollars. */
+  cost?: number;
   parser: number;
   importedAt: string;
   status: 'new' | 'seen' | 'dismissed';
@@ -66,9 +75,52 @@ export interface InboxEmail {
 export const INBOX_PARSER_VERSION = 3;
 /** Agencies searched by default. Gmail's from: matches subdomains (connect.medrecruit.com). */
 export const RECRUITER_DOMAINS = ['medrecruit.com', '1medical.com.au'];
-export function inboxQuery(days: number, domains: string[] = RECRUITER_DOMAINS) {
-  const from = domains.map((d) => d.replace(/^@/, '')).join(' OR ');
-  return `from:(${from}) newer_than:${Math.round(days)}d -in:trash -in:spam -in:sent -in:drafts`;
+export function inboxQuery(days: number, domains: string[] = RECRUITER_DOMAINS, label = '') {
+  const from = domains
+    .map((d) => d.trim().replace(/^@/, '').toLowerCase())
+    .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))
+    .join(' OR ');
+  // Gmail label search uses hyphens for spaces: "Locum offers" → label:locum-offers.
+  const tag = label
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/]+/g, '-')
+    .replace(/[^\w&-]/g, '');
+  const who = [from && `from:(${from})`, tag && `label:${tag}`].filter(Boolean);
+  const scope = who.length > 1 ? `{${who.join(' ')}}` : (who[0] ?? 'from:(medrecruit.com)');
+  return `${scope} newer_than:${Math.round(days)}d -in:trash -in:spam -in:sent -in:drafts`;
+}
+
+/** Owner choices for the recruiter inbox; stored as one row of the settings table. */
+export interface InboxSettings {
+  id: 'inbox';
+  /** Agency ids (see agencies.ts) whose emails are searched. */
+  agencies: string[];
+  /** Agencies the owner has signed up with (checklist only). */
+  signedUp: string[];
+  /** Extra sender domains, e.g. a recruiter not in the list. */
+  extraDomains: string[];
+  /** Optional Gmail label read in addition, for forwarded or hand-labelled adverts. */
+  label: string;
+  days: number;
+  /** Import automatically when the app opens and the last import is old. */
+  autoImport: boolean;
+  /** Let Claude read emails the built-in readers cannot. */
+  claude: boolean;
+  /** Agency ids that existed when the owner last saved, so new agencies start included. */
+  knownAgencies?: string[];
+}
+export function defaultInboxSettings(agencyIds: string[]): InboxSettings {
+  return {
+    id: 'inbox',
+    agencies: agencyIds,
+    signedUp: ['medrecruit', '1medical'],
+    extraDomains: [],
+    label: '',
+    days: 30,
+    autoImport: true,
+    claude: true,
+  };
 }
 
 const STATES = ['QLD', 'NSW', 'VIC', 'WA', 'SA', 'NT', 'TAS', 'ACT'] as const;
@@ -81,7 +133,7 @@ export function draftFromVacancy(
   return {
     sourceId: 'email',
     externalId: `inbox-${v.id}`,
-    url: email.gmailUrl,
+    url: email.gmailUrl || null,
     rawText: `From: ${email.recruiter} (${email.agency})\nSubject: ${email.subject}\n${v.excerpt}`,
     title: v.role,
     facilityName: v.hospital,

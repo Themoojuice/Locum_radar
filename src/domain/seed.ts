@@ -157,6 +157,7 @@ export function emptyStore(): Store {
     reviews: [],
     documents: [],
     inbox: [],
+    settings: [],
   };
 }
 
