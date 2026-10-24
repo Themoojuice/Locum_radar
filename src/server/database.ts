@@ -4,7 +4,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { Pool, type PoolClient } from 'pg';
 import type { Store } from '@/domain/model';
 import { emptyStore } from '@/domain/seed';
-import { applyPublicStarter, collectionEnabled } from './public-starter';
 
 type Row = Record<string, string>;
 interface Connection {
@@ -37,6 +36,8 @@ const tables = [
   ['collection_runs', 'runs', ', source_id TEXT NOT NULL REFERENCES sources(id)'],
   ['review_queue', 'reviews', ''],
   ['acquisition_documents', 'documents', ', source_id TEXT NOT NULL REFERENCES sources(id)'],
+  ['inbox_emails', 'inbox', ''],
+  ['app_settings', 'settings', ''],
 ] as const;
 const globals = globalThis as unknown as {
   radarSqlite?: DatabaseSync;
@@ -138,7 +139,6 @@ async function load(c: Connection): Promise<Store> {
   const profile = await c.query("SELECT payload FROM user_profiles WHERE id = 'owner'");
   if (!profile[0]?.payload) {
     const fresh = emptyStore();
-    if (collectionEnabled()) applyPublicStarter(fresh);
     applyEnvironmentApprovals(fresh);
     return fresh;
   }
@@ -161,7 +161,6 @@ async function load(c: Connection): Promise<Store> {
         intervalHours: seed.intervalHours,
       });
   }
-  if (collectionEnabled()) applyPublicStarter(store);
   applyEnvironmentApprovals(store);
   return store;
 }

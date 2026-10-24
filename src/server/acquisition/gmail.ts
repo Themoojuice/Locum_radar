@@ -154,9 +154,17 @@ export async function gmailRequest<T>(relative: string): Promise<T> {
         if (oauth.credentials.access_token !== tokens.access_token)
           await saveTokens(oauth.credentials);
         return result.data;
-      } catch {
+      } catch (error) {
+        const status = (error as { response?: { status?: number } }).response?.status;
         throw new Error(
-          'Gmail request failed. Check the selected label or reconnect your account.',
+          status === 401 || /invalid_grant/i.test(String((error as Error).message))
+            ? 'Gmail access has expired or was revoked. Disconnect and reconnect Gmail.'
+            : status === 403
+              ? 'Google refused the request (403). Check the Gmail API is enabled for your Google Cloud project, then reconnect.'
+              : status === 429
+                ? 'Gmail is rate-limiting requests. Wait a minute and try again.'
+                : `Gmail request failed${status ? ` (HTTP ${status})` : ''}. Check your connection or reconnect Gmail.`,
+          { cause: error },
         );
       }
     });

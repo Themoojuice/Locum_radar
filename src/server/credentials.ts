@@ -7,6 +7,7 @@ export const credentialNames = [
   'ADZUNA_APP_ID',
   'ADZUNA_APP_KEY',
   'BRAVE_SEARCH_API_KEY',
+  'ANTHROPIC_API_KEY',
 ] as const;
 export type CredentialName = (typeof credentialNames)[number];
 const directory = () =>

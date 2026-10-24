@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { emptyStore } from '@/domain/seed';
-import { applyPublicStarter } from '@/server/public-starter';
 import { parseWeb } from '@/server/acquisition/parsers';
 import { sourceRecipes } from '@/domain/source-catalog';
 const recipe = sourceRecipes.find((r) => r.id === 'ochre')!;
@@ -27,19 +25,6 @@ describe('public starter', () => {
         false,
       ).links[0].signature,
     ).not.toBe(result.links[0].signature);
-  });
-  it('enables only the inspected public source and preserves later owner decisions', () => {
-    const store = emptyStore();
-    applyPublicStarter(store);
-    expect(store.sources.filter((s) => s.enabled).map((s) => s.id)).toEqual(['ochre']);
-    const source = store.sources.find((s) => s.id === 'ochre')!;
-    expect(source.method).toBe('collector');
-    source.enabled = false;
-    applyPublicStarter(store);
-    expect(source.enabled).toBe(false);
-    source.permission = 'denied';
-    applyPublicStarter(store);
-    expect(source.permission).toBe('denied');
   });
   it('extracts placement dates and advertised pay without unrelated roles or invented facilities', () => {
     const result = parseWeb(

@@ -48,7 +48,10 @@ describe('durable collector checkpoints', () => {
     expect(first.status).toBe('partial');
     expect(first.pages).toBe(3);
     expect(first.remaining).toBe(1);
-    expect(collectionPlan(await readStore(), true).ready).toBe(1);
+    // Generic page collectors run only from the command line; the app never schedules them.
+    expect(collectionPlan(await readStore(), true).sources.some((s) => s.id === 'ochre')).toBe(
+      false,
+    );
     expect((await collectSource('ochre')).status).toBe('success');
     const saved = await readStore();
     expect(saved.documents).toHaveLength(4);
@@ -101,7 +104,7 @@ describe('durable collector checkpoints', () => {
     processor.mockRejectedValue(new Error('Source rate-limited collection; wait before retrying'));
     expect((await collectSource('ochre')).status).toBe('partial');
     expect((await readStore()).sources[0].crawl?.pages).toBe(0);
-    expect(collectionPlan(await readStore(), true).waiting).toBe(1);
+    expect((await readStore()).sources[0].crawl?.retryAfter).toBeTruthy();
     expect((await collectSource('ochre')).status).toBe('skipped');
     expect(processor).toHaveBeenCalledTimes(1);
   });

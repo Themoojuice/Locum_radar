@@ -2,7 +2,7 @@
 
 A private workspace for finding and comparing Australian medical locum opportunities, with 2027 planning as the initial focus.
 
-**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Resumable acquisition supports public pages, feeds, sitemaps, Adzuna, recent web/forum leads and Gmail label or explicit mailbox searches. Source qualification and missing setup are explicit. No email account, paid API or hosted service is connected by default.
+**First draft, not a live national job aggregator.** The interface, database, reviewed imports, eligibility engine, deterministic ranking, reconciliation, comparisons, tracker and calendar work locally. Jobs arrive through the **Recruiter inbox** (agency emails from Gmail, a Gmail label, and pasted texts or screenshots) and four structured agency feeds (Medrecruit, 1Medical, Wavelength, Adzuna). No email account, paid API or hosted service is connected by default.
 
 ![The fictional example workspace](docs/screenshots/radar-desktop.png)
 
@@ -24,11 +24,17 @@ Open **http://127.0.0.1:3000**. The server binds only to your computer's loopbac
 
 See [the import guide](docs/importing.md) for supported fields and [the acquisition guide](docs/acquisition-plan.md) for collector recipes, Gmail setup, API options and source qualification. Free-form extraction recognises a limited set of explicit patterns; arbitrary recruiter formats and attachments still require review or transcription.
 
-## Public results without setup
+## Getting jobs in
 
-Opening your private Discover workspace automatically scans the inspected Ochre public board when due. No API key, Gmail connection or environment file is required. Collected adverts appear progressively in Discover with source links, advertised rates and dates; missing facility and eligibility details remain unknown. All collected drafts, email imports and reviewed jobs share one filterable board; review is needed for confirmation and ranking, not for visibility. Filters include source, specialty, state, grade, dates and minimum advertised rate in a chosen pay unit. Connected sources are checked when due while Discover is open. Ochre listing summaries are compared on refresh so unchanged detail pages can be reused for up to seven days; new or changed adverts are fetched immediately. Scan totals accumulate across batches. The initial source refreshes daily, and an interrupted scan resumes from its saved queue. Keep Discover open while it runs, or use `npm run collect -- ochre --drain`.
+Recruiters already email their vacancies, so the inbox is the main funnel:
 
-The source catalog includes optional connections and unqualified candidates; its count is not a count of working feeds. Explicitly disabling a source is preserved. Set `COLLECTOR_ENABLED=false` to stop all collection.
+1. Open **Recruiter inbox → Settings**. Sign up for job emails with the listed agencies (each has a sign-up link), and save an Anthropic API key so Claude can read agencies without a built-in reader.
+2. Connect Gmail (read-only) and press **Import offers**. Medrecruit and 1Medical layouts are read by built-in readers; everything else is read by Claude Haiku, which copies each field as written while the app's own code works out dates and pay. Complete vacancies join the job feed; ones missing a detail wait for a click.
+3. For anything else (a recruiter's text, a WhatsApp message, a screenshot) use **Add an advert**.
+
+New emails are imported automatically when the app opens, at most every six hours. **Check Claude's accuracy** in Settings compares Claude with the built-in readers on your own emails. See [the import guide](docs/importing.md#recruiter-inbox-gmail).
+
+The structured agency feeds are switched on under **Agency job boards**. Generic page crawling is no longer offered in the app; the command-line collector (`npm run collect`) remains for advanced use. Set `COLLECTOR_ENABLED=false` to stop all collection.
 
 ## Adding more sources
 
@@ -126,7 +132,7 @@ No commercial licensing assumptions or third-party redistribution rights are inf
 
 ## Guided source setup
 
-Use **Import from Gmail** on Discover or Sources. If Google credentials are missing, the app shows direct Google Cloud links, the exact callback URL, and client-ID/secret fields. Saving needs no environment-file edits or restart. Google app registration and account consent remain required. Existing environment credentials still work. Locally saved provider credentials are encrypted under `data/secrets`; keep this private directory with database backups and do not share it.
+**Recruiter inbox** imports Medrecruit and 1Medical emails from Gmail with one button and lists their vacancies; complete ones join the job feed (see [the import guide](docs/importing.md#recruiter-inbox-gmail)). Use **Import from Gmail** on Discover or Sources to connect. If Google credentials are missing, the app shows direct Google Cloud links, the exact callback URL, and client-ID/secret fields. Saving needs no environment-file edits or restart. Google app registration and account consent remain required. Existing environment credentials still work. Locally saved provider credentials are encrypted under `data/secrets`; keep this private directory with database backups and do not share it.
 
 After connecting, choose **Search all mail for possible locum offers** or **Only my selected recruitment label**. Search mode is explicitly selected; older label-only configurations remain label-only. All-history import has no date cutoff; otherwise choose up to 365 days. The editable Gmail query can miss unfamiliar wording and can include non-job messages. Email bodies are imported progressively into Discover; attachment contents still require separate review. Keep the page open; Pause stops after the current batch and the next import resumes it. Scan limits are displayed, and repeated imports deduplicate unchanged messages.
 

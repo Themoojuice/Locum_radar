@@ -30,6 +30,11 @@ const schema = z
     ADZUNA_APP_ID: z.string().trim().min(1).max(2000).optional(),
     ADZUNA_APP_KEY: z.string().trim().min(1).max(2000).optional(),
     BRAVE_SEARCH_API_KEY: z.string().trim().min(1).max(2000).optional(),
+    ANTHROPIC_API_KEY: z
+      .string()
+      .trim()
+      .regex(/^sk-ant-[\w-]{20,}$/)
+      .optional(),
   })
   .strict();
 export async function POST(request: Request) {
@@ -46,7 +51,7 @@ export async function POST(request: Request) {
       {
         error:
           e instanceof z.ZodError
-            ? 'Check the credential fields. Enter a Google web client ID ending in .apps.googleusercontent.com.'
+            ? 'Check the credential fields. A Google client ID ends in .apps.googleusercontent.com; an Anthropic key starts with sk-ant-.'
             : (e as Error).message,
       },
       { status: 400 },
